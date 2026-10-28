@@ -3,25 +3,31 @@
 click set, and the "Starter Kit" demo project that uses them.
 
 Everything is generated from fixed seeds with the Python standard library only, so the output is
-byte-for-byte reproducible and clearly ours to ship (CC0, see Kick/assets/StarterKit/LICENSE).
+byte-for-byte reproducible and clearly ours to ship (CC0, see LICENSE beside this script).
 
-    python3 Kick/tools/make_starter_kit.py          # rewrites the files below
+    python3 content/StarterKit/make_starter_kit.py             # rewrites the files below
+    python3 content/StarterKit/make_starter_kit.py --out DIR   # writes the same tree under DIR
 
-Outputs (paths relative to Kick/):
-    assets/StarterKit/Kit/NN Name.wav          16 drum sounds (pads 1-16 of bank A)
-    assets/StarterKit/Instruments/*.wav        Keys C4 and Bass C2, played chromatically
-    assets/StarterKit/Loops/*.wav              one-bar loops at 120 BPM
-    assets/StarterKit/Metronome/Click*.wav     metronome click (beat) and accent (bar)
-    demos/Starter Kit/Starter Kit.kickPrj      the project (see docs/DEVELOPMENT.md 4.4)
-    demos/Starter Kit/Starter Kit.png          120x70 thumbnail (names the tile image)
-    assets/Default/recent_project/Starter Kit.png   180x130 tile the Projects screen draws
+Outputs (paths relative to content/StarterKit/, or to DIR), and where the emulator installs them
+in the firmware's data paths:
+    samples/Kit/NN Name.wav               16 drum sounds (pads 1-16 of bank A)
+    samples/Instruments/*.wav             Keys C4 and Bass C2, played chromatically
+    samples/Loops/*.wav                   one-bar loops at 120 BPM
+    samples/Metronome/Click*.wav          metronome click (beat) and accent (bar)
+        samples/ -> assets/StarterKit/ and data/samplesKick/StarterKit/
+    demos/Starter Kit/Starter Kit.kickPrj the project
+    demos/Starter Kit/Starter Kit.png     120x70 thumbnail (names the tile image)
+        demos/Starter Kit/ -> demos/Starter Kit/
+    recent_project/Starter Kit.png        180x130 tile the Projects screen draws
+        -> assets/Default/recent_project/Starter Kit.png
 
 All audio is 48 kHz, 16-bit, mono WAV (the engine resamples nothing at 48 kHz and duplicates mono
 to both channels). Sample paths in the project are relative to the desktop samples root
-(./data/samplesKick/, where the simulator build copies assets/StarterKit); the engine resolves
-them when it loads the project.
+(./data/samplesKick/, where the emulator installs samples/ as StarterKit/); the engine resolves
+them when it loads the project (firmware change fix/relative-sample-paths).
 """
 
+import argparse
 import math
 import os
 import random
@@ -30,9 +36,20 @@ import wave
 import zlib
 
 SR = 48000
-KICK_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-KIT_ROOT = os.path.join(KICK_DIR, "assets", "StarterKit")
-PROJECT_DIR = os.path.join(KICK_DIR, "demos", "Starter Kit")
+OUT_DIR = os.path.dirname(os.path.abspath(__file__))  # --out overrides it (see set_out_dir)
+KIT_ROOT = os.path.join(OUT_DIR, "samples")
+PROJECT_DIR = os.path.join(OUT_DIR, "demos", "Starter Kit")
+TILE_DIR = os.path.join(OUT_DIR, "recent_project")
+
+
+def set_out_dir(path):
+    global OUT_DIR, KIT_ROOT, PROJECT_DIR, TILE_DIR
+    OUT_DIR = os.path.abspath(path)
+    KIT_ROOT = os.path.join(OUT_DIR, "samples")
+    PROJECT_DIR = os.path.join(OUT_DIR, "demos", "Starter Kit")
+    TILE_DIR = os.path.join(OUT_DIR, "recent_project")
+
+
 SAMPLE_PREFIX = "StarterKit"  # relative to the samples root (./data/samplesKick/ on desktop)
 
 TAU = 2.0 * math.pi
@@ -382,6 +399,7 @@ def write_png(path, width, height, pixel):
     png += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
     png += chunk(b"IDAT", zlib.compress(bytes(raw), 9))
     png += chunk(b"IEND", b"")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(png)
 
@@ -664,10 +682,16 @@ def build():
     thumbnail(os.path.join(PROJECT_DIR, "Starter Kit.png"))
     # The Projects screen draws a demo's tile from the theme (assets/<theme>/recent_project/
     # <png name in the project folder>), 180x130 like the factory demos.
-    thumbnail(os.path.join(KICK_DIR, "assets", "Default", "recent_project", "Starter Kit.png"), 180, 130)
+    # The emulator installs it as assets/Default/recent_project/Starter Kit.png.
+    thumbnail(os.path.join(TILE_DIR, "Starter Kit.png"), 180, 130)
 
 
 if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="Synthesise the Kick Starter Kit (CC0).")
+    ap.add_argument("--out", metavar="DIR", help="write the tree under DIR instead of beside this script")
+    args = ap.parse_args()
+    if args.out:
+        set_out_dir(args.out)
     build()
     total = 0
     for root, _, files in os.walk(KIT_ROOT):

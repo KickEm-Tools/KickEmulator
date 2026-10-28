@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""kickem: run a Kick firmware fork against the emulated front panel.
+
+    ./kickem fetch [--firmware URL] [--ref REF]
+    ./kickem run   [--firmware URL] [--ref REF] [--mode fast|vm] [--logo PNG]
+
+fetch clones or updates REF of URL into the cache ($KICKEM_CACHE, else $XDG_CACHE_HOME/kickem,
+else ~/.cache/kickem) and prints the checkout's path and commit. Pass that path to CMake as
+-DKICKEM_FIRMWARE_DIR. REF is a branch, a tag or a full commit SHA. URL may also be a local
+repository path.
+
+run fetches, then builds and runs the mode. Building and running come in phase 5 (fast) and
+phase 6 (vm). Until then run stops after the fetch and the machine-wide lock.
+
+Only one emulator (or in-tree KT_KickEM simulator) runs per machine. run holds a lock
+directory ($KICKEM_LOCK, default /tmp/kt_kickem.lock, the same lock and format as the in-tree
+sim_launch.sh: a directory holding the owner's pid; a dead owner's lock is reclaimed) and waits
+up to $KICKEM_LOCK_WAIT seconds (default 1800) for another instance to quit.
+
+Python 3.8+ standard library only.
+"""
+
+import argparse
+import contextlib
+import datetime
+import fcntl
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+DEFAULT_FIRMWARE = "https://github.com/KickEm-Tools/0700-AAM.git"
+DEFAULT_REF = "main"
+ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def say(msg):
+    print("kickem: " + msg, file=sys.stderr)
+
+
+def die(msg, code=1):
+    say(msg)
+    sys.exit(code)
+
+
+def cache_dir():
+    if os.environ.get("KICKEM_CACHE"):
+        return os.path.abspath(os.path.expanduser(os.environ["KICKEM_CACHE"]))
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "kickem")
+
+
+def git(*args, cwd=None, capture=False):
+    cmd = ["git"] + list(args)
+    if capture:
+        return subprocess.run(cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).stdout.strip()
+    subprocess.run(cmd, cwd=cwd, check=True)
+    return ""
+
+
+def slug(text, limit=40):
+    s = re.sub(r"[^A-Za-z0-9._-]+", "_", text).strip("_.")
+    return s[:limit] or "x"
+
+
+def normalise_firmware(url):
+    if url.startswith("-"):
+        die("--firmware must be a URL or a path, not %r" % url, 2)
+    if os.path.isdir(os.path.expanduser(url)):
+        return "file://" + os.path.abspath(os.path.expanduser(url))  # file:// so --depth works
+    return url
+
+
+def check_ref(ref):
+    # Git refs cannot hold these; a leading '-' would read as an option.
+    if not ref or ref.startswith("-") or re.search(r"[\s~^:?*\[\\]|\.\.|@\{", ref):
+        die("--ref %r is not a valid branch, tag or commit" % ref, 2)
+    if re.fullmatch(r"[0-9a-fA-F]{7,39}", ref):
+        say("note: %r looks like a short SHA; servers only serve full 40-character SHAs, "
+            "so it is fetched as a branch or tag name" % ref)
+
+
+def checkout_dir(url, ref):
+    """<cache>/firmware/<repo name>-<hash of url>/<ref>-<hash of ref>: one checkout per URL and ref."""
+    h = lambda s: hashlib.sha1(s.encode()).hexdigest()[:10]
+    name = slug(re.sub(r"(\.git)?/*$", "", url).rsplit("/", 1)[-1])
+    return os.path.join(cache_dir(), "firmware", "%s-%s" % (name, h(url)), "%s-%s" % (slug(ref), h(ref)))
+
+
+@contextlib.contextmanager
+def file_lock(path):
+    """Serialises fetches of the same checkout (fetch does not need the machine-wide lock)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def fetch(url, ref, force=False):
+    """Clones or updates REF of URL (shallow) into the cache; returns (path, commit)."""
+    check_ref(ref)
+    url = normalise_firmware(url)
+    if shutil.which("git") is None:
+        die("git is not installed")
+    path = checkout_dir(url, ref)
+    with file_lock(path + ".lock"):
+        fresh = not os.path.isdir(os.path.join(path, ".git"))
+        if fresh:
+            say("fetching %s %s into %s" % (url, ref, path))
+            if os.path.exists(path):
+                shutil.rmtree(path)  # a half-made checkout from an interrupted fetch
+            os.makedirs(path)
+            git("init", "--quiet", path)
+            git("remote", "add", "origin", url, cwd=path)
+        else:
+            say("updating %s %s in %s" % (url, ref, path))
+            if git("status", "--porcelain", "--untracked-files=no", cwd=path, capture=True) and not force:
+                die("%s has local changes; commit them elsewhere or run fetch --force to discard them" % path)
+        try:
+            # Works for a branch, a tag or a full commit SHA alike; --depth 1 keeps it small.
+            git("fetch", "--quiet", "--depth", "1", "--no-tags", "origin", ref, cwd=path)
+        except subprocess.CalledProcessError:
+            if fresh:
+                shutil.rmtree(path, ignore_errors=True)
+            die("cannot fetch %s from %s" % (ref, url))
+        git("checkout", "--quiet", "--force", "--detach", "FETCH_HEAD", cwd=path)
+        commit = git("rev-parse", "HEAD", cwd=path, capture=True)
+        subject = git("log", "-1", "--format=%s", cwd=path, capture=True)
+        with open(os.path.join(path, ".git", "kickem-fetch.json"), "w") as f:
+            json.dump({"url": url, "ref": ref, "commit": commit,
+                       "fetched": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}, f, indent=2)
+    print("firmware  %s" % url)
+    print("ref       %s" % ref)
+    print("commit    %s  %s" % (commit, subject))
+    print("checkout  %s" % path)
+    return path, commit
+
+
+# --- Machine-wide lock (same lock and format as sim_launch.sh) -------------------------------
+LOCK = os.environ.get("KICKEM_LOCK") or os.environ.get("KICK_SIM_LOCK") or "/tmp/kt_kickem.lock"
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def lock_owner():
+    try:
+        with open(os.path.join(LOCK, "pid")) as f:
+            return int(f.read().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def acquire_lock(wait=None):
+    """Takes the machine-wide lock, waiting for another instance to quit. Owner: this process."""
+    wait = int(os.environ.get("KICKEM_LOCK_WAIT", "1800")) if wait is None else wait
+    waited, ownerless_since = 0, None
+    while True:
+        try:
+            os.mkdir(LOCK)
+            with open(os.path.join(LOCK, "pid"), "w") as f:
+                f.write("%d\n" % os.getpid())
+            return
+        except FileExistsError:
+            owner = lock_owner()
+            if owner and not alive(owner):
+                say("reclaiming the lock of dead pid %d" % owner)
+                shutil.rmtree(LOCK, ignore_errors=True)
+                continue
+            if not owner:
+                # A launcher between mkdir and writing its pid; give it 30 s, as sim_launch.sh does.
+                ownerless_since = ownerless_since if ownerless_since is not None else waited
+                if waited - ownerless_since >= 30:
+                    shutil.rmtree(LOCK, ignore_errors=True)
+                    continue
+        if waited >= wait:
+            die("another emulator (lock %s, pid %s) is still running after %d s" % (LOCK, lock_owner() or "?", wait))
+        if waited == 0:
+            say("waiting for another emulator to quit (lock %s, pid %s)..." % (LOCK, lock_owner() or "?"))
+        time.sleep(5)
+        waited += 5
+
+
+def release_lock():
+    if lock_owner() == os.getpid():
+        shutil.rmtree(LOCK, ignore_errors=True)
+
+
+# --- Commands ----------------------------------------------------------------------------------
+def cmd_fetch(a):
+    fetch(a.firmware, a.ref, force=a.force)
+    return 0
+
+
+def cmd_run(a):
+    if a.logo and not os.path.isfile(a.logo):
+        die("--logo %s: no such file" % a.logo, 2)
+    path, commit = fetch(a.firmware, a.ref, force=a.force)
+    acquire_lock()
+    try:
+        phase = {"fast": 5, "vm": 6}[a.mode]
+        say("lock %s held by pid %d" % (LOCK, os.getpid()))
+        say("--mode %s: building and running the firmware is not implemented until phase %d of "
+            "/goal-standalone. The checkout is ready for -DKICKEM_FIRMWARE_DIR=%s" % (a.mode, phase, path))
+        return 3
+    finally:
+        release_lock()
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="kickem", description="Run a Kick firmware fork against the emulated front panel.")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    def common(sp):
+        sp.add_argument("--firmware", default=DEFAULT_FIRMWARE, metavar="URL", help="firmware git URL or local repository (default: %(default)s)")
+        sp.add_argument("--ref", default=DEFAULT_REF, help="branch, tag or full commit SHA (default: %(default)s)")
+        sp.add_argument("--force", action="store_true", help="discard local changes in the cached checkout")
+
+    f = sub.add_parser("fetch", help="clone or update the firmware ref into the cache")
+    common(f)
+    f.set_defaults(func=cmd_fetch)
+
+    r = sub.add_parser("run", help="fetch, build and run the firmware against the panel")
+    common(r)
+    r.add_argument("--mode", choices=("fast", "vm"), default="fast", help="fast: desktop build over a pty; vm: Linux arm64 in QEMU (default: %(default)s)")
+    r.add_argument("--logo", metavar="PNG", help="logo the panel prints above the screen (none is shipped)")
+    r.set_defaults(func=cmd_run)
+
+    a = p.parse_args(argv)
+    return a.func(a)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

@@ -1,0 +1,1372 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<ROOT name="Starter Kit" manufacturer="Musictribe" version="0.1" bpm="120.0" length="4" num="4" den="4" isMasterBPM="1">
+  <BUSES/>
+  <FILEMANAGER id="skFileMg">
+    <ASSETS>
+      <FILE id="skFile01" path="StarterKit/Kit/01 Kick.wav">
+        <SLICE id="skS01000"/>
+        <SLICE id="skS01001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile02" path="StarterKit/Kit/02 Snare.wav">
+        <SLICE id="skS02000"/>
+        <SLICE id="skS02001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile03" path="StarterKit/Kit/03 Closed Hat.wav">
+        <SLICE id="skS03000"/>
+        <SLICE id="skS03001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile04" path="StarterKit/Kit/04 Open Hat.wav">
+        <SLICE id="skS04000"/>
+        <SLICE id="skS04001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile05" path="StarterKit/Kit/05 Clap.wav">
+        <SLICE id="skS05000"/>
+        <SLICE id="skS05001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile06" path="StarterKit/Kit/06 Rim.wav">
+        <SLICE id="skS06000"/>
+        <SLICE id="skS06001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile07" path="StarterKit/Kit/07 Low Tom.wav">
+        <SLICE id="skS07000"/>
+        <SLICE id="skS07001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile08" path="StarterKit/Kit/08 Mid Tom.wav">
+        <SLICE id="skS08000"/>
+        <SLICE id="skS08001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile09" path="StarterKit/Kit/09 High Tom.wav">
+        <SLICE id="skS09000"/>
+        <SLICE id="skS09001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile10" path="StarterKit/Kit/10 Crash.wav">
+        <SLICE id="skS10000"/>
+        <SLICE id="skS10001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile11" path="StarterKit/Kit/11 Ride.wav">
+        <SLICE id="skS11000"/>
+        <SLICE id="skS11001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile12" path="StarterKit/Kit/12 Shaker.wav">
+        <SLICE id="skS12000"/>
+        <SLICE id="skS12001" semi="-7"/>
+      </FILE>
+      <FILE id="skFile13" path="StarterKit/Kit/13 Cowbell.wav">
+        <SLICE id="skS13000"/>
+      </FILE>
+      <FILE id="skFile14" path="StarterKit/Kit/14 Conga.wav">
+        <SLICE id="skS14000"/>
+      </FILE>
+      <FILE id="skFile15" path="StarterKit/Kit/15 Clave.wav">
+        <SLICE id="skS15000"/>
+      </FILE>
+      <FILE id="skFile16" path="StarterKit/Kit/16 Zap.wav">
+        <SLICE id="skS16000"/>
+      </FILE>
+      <FILE id="skFile17" path="StarterKit/Instruments/Keys C4.wav">
+        <SLICE id="skS17000"/>
+        <SLICE id="skS17001" semi="1"/>
+        <SLICE id="skS17002" semi="2"/>
+        <SLICE id="skS17003" semi="3"/>
+        <SLICE id="skS17004" semi="4"/>
+        <SLICE id="skS17005" semi="5"/>
+        <SLICE id="skS17006" semi="6"/>
+        <SLICE id="skS17007" semi="7"/>
+        <SLICE id="skS17008" semi="8"/>
+        <SLICE id="skS17009" semi="9"/>
+        <SLICE id="skS17010" semi="10"/>
+        <SLICE id="skS17011" semi="11"/>
+        <SLICE id="skS17012" semi="12"/>
+        <SLICE id="skS17013" semi="13"/>
+        <SLICE id="skS17014" semi="14"/>
+        <SLICE id="skS17015" semi="15"/>
+        <SLICE id="skS17016" semi="-12"/>
+        <SLICE id="skS17017" semi="-11"/>
+        <SLICE id="skS17018" semi="-10"/>
+        <SLICE id="skS17019" semi="-9"/>
+        <SLICE id="skS17020" semi="-8"/>
+        <SLICE id="skS17021" semi="-7"/>
+        <SLICE id="skS17022" semi="-6"/>
+        <SLICE id="skS17023" semi="-5"/>
+        <SLICE id="skS17024" semi="-4"/>
+        <SLICE id="skS17025" semi="-3"/>
+        <SLICE id="skS17026" semi="-2"/>
+        <SLICE id="skS17027" semi="-1"/>
+        <SLICE id="skS17028" semi="16"/>
+        <SLICE id="skS17029" semi="17"/>
+        <SLICE id="skS17030" semi="18"/>
+        <SLICE id="skS17031" semi="19"/>
+        <SLICE id="skS17032" semi="20"/>
+        <SLICE id="skS17033" semi="21"/>
+        <SLICE id="skS17034" semi="22"/>
+        <SLICE id="skS17035" semi="23"/>
+        <SLICE id="skS17036" semi="24"/>
+        <SLICE id="skS17037" semi="25"/>
+        <SLICE id="skS17038" semi="26"/>
+        <SLICE id="skS17039" semi="27"/>
+        <SLICE id="skS17040" semi="28"/>
+        <SLICE id="skS17041" semi="29"/>
+        <SLICE id="skS17042" semi="30"/>
+        <SLICE id="skS17043" semi="31"/>
+        <SLICE id="skS17044" semi="32"/>
+        <SLICE id="skS17045" semi="33"/>
+        <SLICE id="skS17046" semi="34"/>
+        <SLICE id="skS17047" semi="35"/>
+      </FILE>
+      <FILE id="skFile18" path="StarterKit/Instruments/Bass C2.wav">
+        <SLICE id="skS18000"/>
+        <SLICE id="skS18001" semi="1"/>
+        <SLICE id="skS18002" semi="2"/>
+        <SLICE id="skS18003" semi="3"/>
+        <SLICE id="skS18004" semi="4"/>
+        <SLICE id="skS18005" semi="5"/>
+        <SLICE id="skS18006" semi="6"/>
+        <SLICE id="skS18007" semi="7"/>
+        <SLICE id="skS18008" semi="8"/>
+        <SLICE id="skS18009" semi="9"/>
+        <SLICE id="skS18010" semi="10"/>
+        <SLICE id="skS18011" semi="11"/>
+        <SLICE id="skS18012" semi="12"/>
+        <SLICE id="skS18013" semi="13"/>
+        <SLICE id="skS18014" semi="14"/>
+        <SLICE id="skS18015" semi="15"/>
+      </FILE>
+      <FILE id="skFile19" path="StarterKit/Loops/Drum Loop 120.wav">
+        <SLICE id="skS19000"/>
+      </FILE>
+      <FILE id="skFile20" path="StarterKit/Loops/Bass Loop 120.wav">
+        <SLICE id="skS20000"/>
+      </FILE>
+      <FILE id="skFile21" path="StarterKit/Loops/Chord Stab.wav">
+        <SLICE id="skS21000"/>
+      </FILE>
+      <FILE id="skFile22" path="StarterKit/Loops/Riser.wav">
+        <SLICE id="skS22000"/>
+      </FILE>
+    </ASSETS>
+    <AUDIO/>
+    <EXPORTS/>
+  </FILEMANAGER>
+  <TEMPOS>
+    <TEMPO bpm="120.0" num="4" den="4"/>
+  </TEMPOS>
+  <PROGRAMS>
+    <PROGRAM id="skPrg001" name="Starter Drums" type="0">
+      <COLOURS clr16="6" clr17="6" clr18="6" clr19="6" clr20="6" clr21="6" clr22="6" clr23="6" clr24="6" clr25="6" clr26="6" clr27="6" clr28="6" clr29="6" clr30="6" clr31="6" clr32="3" clr33="3" clr34="3" clr35="3" clr36="3" clr37="3" clr38="3" clr39="3" clr40="3" clr41="3" clr42="3" clr43="3" clr44="3" clr45="3" clr46="3" clr47="3" clr48="9" clr49="9" clr50="9" clr51="9" clr52="13" clr53="13" clr54="13" clr55="13" clr56="13" clr57="13" clr58="13" clr59="13" clr60="13" clr61="13" clr62="13" clr63="13"/>
+      <CLIPS>
+        <CLIP keyNote="0" minNote="0" maxNote="0">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/01 Kick.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="1" minNote="1" maxNote="1">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/02 Snare.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="2" minNote="2" maxNote="2">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/03 Closed Hat.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="3" minNote="3" maxNote="3">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/04 Open Hat.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="4" minNote="4" maxNote="4">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/05 Clap.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="5" minNote="5" maxNote="5">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/06 Rim.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="6" minNote="6" maxNote="6">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/07 Low Tom.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="7" minNote="7" maxNote="7">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/08 Mid Tom.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="8" minNote="8" maxNote="8">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/09 High Tom.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="9" minNote="9" maxNote="9">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/10 Crash.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="10" minNote="10" maxNote="10">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/11 Ride.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="11" minNote="11" maxNote="11">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/12 Shaker.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="12" minNote="12" maxNote="12">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/13 Cowbell.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="13" minNote="13" maxNote="13">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/14 Conga.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="14" minNote="14" maxNote="14">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/15 Clave.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="15" minNote="15" maxNote="15">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/16 Zap.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="16" minNote="16" maxNote="16">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="17" minNote="17" maxNote="17">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="18" minNote="18" maxNote="18">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="2"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="19" minNote="19" maxNote="19">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="3"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="20" minNote="20" maxNote="20">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="4"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="21" minNote="21" maxNote="21">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="5"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="22" minNote="22" maxNote="22">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="6"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="23" minNote="23" maxNote="23">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="7"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="24" minNote="24" maxNote="24">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="8"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="25" minNote="25" maxNote="25">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="9"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="26" minNote="26" maxNote="26">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="10"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="27" minNote="27" maxNote="27">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="11"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="28" minNote="28" maxNote="28">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="12"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="29" minNote="29" maxNote="29">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="13"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="30" minNote="30" maxNote="30">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="14"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="31" minNote="31" maxNote="31">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="15"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="32" minNote="32" maxNote="32">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="33" minNote="33" maxNote="33">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="34" minNote="34" maxNote="34">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="2"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="35" minNote="35" maxNote="35">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="3"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="36" minNote="36" maxNote="36">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="4"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="37" minNote="37" maxNote="37">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="5"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="38" minNote="38" maxNote="38">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="6"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="39" minNote="39" maxNote="39">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="7"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="40" minNote="40" maxNote="40">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="8"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="41" minNote="41" maxNote="41">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="9"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="42" minNote="42" maxNote="42">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="10"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="43" minNote="43" maxNote="43">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="11"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="44" minNote="44" maxNote="44">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="12"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="45" minNote="45" maxNote="45">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="13"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="46" minNote="46" maxNote="46">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="14"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="47" minNote="47" maxNote="47">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="15"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="48" minNote="48" maxNote="48">
+          <LAYERS>
+            <LAYER source="StarterKit/Loops/Drum Loop 120.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="49" minNote="49" maxNote="49">
+          <LAYERS>
+            <LAYER source="StarterKit/Loops/Bass Loop 120.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="50" minNote="50" maxNote="50">
+          <LAYERS>
+            <LAYER source="StarterKit/Loops/Chord Stab.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="51" minNote="51" maxNote="51">
+          <LAYERS>
+            <LAYER source="StarterKit/Loops/Riser.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="52" minNote="52" maxNote="52">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/01 Kick.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="53" minNote="53" maxNote="53">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/02 Snare.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="54" minNote="54" maxNote="54">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/03 Closed Hat.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="55" minNote="55" maxNote="55">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/04 Open Hat.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="56" minNote="56" maxNote="56">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/05 Clap.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="57" minNote="57" maxNote="57">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/06 Rim.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="58" minNote="58" maxNote="58">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/07 Low Tom.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="59" minNote="59" maxNote="59">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/08 Mid Tom.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="60" minNote="60" maxNote="60">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/09 High Tom.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="61" minNote="61" maxNote="61">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/10 Crash.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="62" minNote="62" maxNote="62">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/11 Ride.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="63" minNote="63" maxNote="63">
+          <LAYERS>
+            <LAYER source="StarterKit/Kit/12 Shaker.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+      </CLIPS>
+    </PROGRAM>
+    <PROGRAM id="skPrg002" name="Starter Keys" type="0">
+      <COLOURS clr0="6" clr1="6" clr2="6" clr3="6" clr4="6" clr5="6" clr6="6" clr7="6" clr8="6" clr9="6" clr10="6" clr11="6" clr12="6" clr13="6" clr14="6" clr15="6" clr16="6" clr17="6" clr18="6" clr19="6" clr20="6" clr21="6" clr22="6" clr23="6" clr24="6" clr25="6" clr26="6" clr27="6" clr28="6" clr29="6" clr30="6" clr31="6" clr32="6" clr33="6" clr34="6" clr35="6" clr36="6" clr37="6" clr38="6" clr39="6" clr40="6" clr41="6" clr42="6" clr43="6" clr44="6" clr45="6" clr46="6" clr47="6" clr48="3" clr49="3" clr50="3" clr51="3" clr52="3" clr53="3" clr54="3" clr55="3" clr56="3" clr57="3" clr58="3" clr59="3" clr60="3" clr61="3" clr62="3" clr63="3"/>
+      <CLIPS>
+        <CLIP keyNote="0" minNote="0" maxNote="0">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="16"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="1" minNote="1" maxNote="1">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="17"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="2" minNote="2" maxNote="2">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="18"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="3" minNote="3" maxNote="3">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="19"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="4" minNote="4" maxNote="4">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="20"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="5" minNote="5" maxNote="5">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="21"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="6" minNote="6" maxNote="6">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="22"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="7" minNote="7" maxNote="7">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="23"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="8" minNote="8" maxNote="8">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="24"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="9" minNote="9" maxNote="9">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="25"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="10" minNote="10" maxNote="10">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="26"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="11" minNote="11" maxNote="11">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="27"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="12" minNote="12" maxNote="12">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="13" minNote="13" maxNote="13">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="14" minNote="14" maxNote="14">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="2"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="15" minNote="15" maxNote="15">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="3"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="16" minNote="16" maxNote="16">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="4"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="17" minNote="17" maxNote="17">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="5"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="18" minNote="18" maxNote="18">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="6"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="19" minNote="19" maxNote="19">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="7"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="20" minNote="20" maxNote="20">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="8"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="21" minNote="21" maxNote="21">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="9"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="22" minNote="22" maxNote="22">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="10"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="23" minNote="23" maxNote="23">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="11"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="24" minNote="24" maxNote="24">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="12"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="25" minNote="25" maxNote="25">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="13"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="26" minNote="26" maxNote="26">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="14"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="27" minNote="27" maxNote="27">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="15"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="28" minNote="28" maxNote="28">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="28"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="29" minNote="29" maxNote="29">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="29"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="30" minNote="30" maxNote="30">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="30"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="31" minNote="31" maxNote="31">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="31"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="32" minNote="32" maxNote="32">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="32"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="33" minNote="33" maxNote="33">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="33"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="34" minNote="34" maxNote="34">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="34"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="35" minNote="35" maxNote="35">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="35"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="36" minNote="36" maxNote="36">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="36"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="37" minNote="37" maxNote="37">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="37"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="38" minNote="38" maxNote="38">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="38"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="39" minNote="39" maxNote="39">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="39"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="40" minNote="40" maxNote="40">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="40"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="41" minNote="41" maxNote="41">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="41"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="42" minNote="42" maxNote="42">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="42"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="43" minNote="43" maxNote="43">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="43"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="44" minNote="44" maxNote="44">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="44"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="45" minNote="45" maxNote="45">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="45"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="46" minNote="46" maxNote="46">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="46"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="47" minNote="47" maxNote="47">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Keys C4.wav" slice="47"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="48" minNote="48" maxNote="48">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="49" minNote="49" maxNote="49">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="1"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="50" minNote="50" maxNote="50">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="2"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="51" minNote="51" maxNote="51">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="3"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="52" minNote="52" maxNote="52">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="4"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="53" minNote="53" maxNote="53">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="5"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="54" minNote="54" maxNote="54">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="6"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="55" minNote="55" maxNote="55">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="7"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="56" minNote="56" maxNote="56">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="8"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="57" minNote="57" maxNote="57">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="9"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="58" minNote="58" maxNote="58">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="10"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="59" minNote="59" maxNote="59">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="11"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="60" minNote="60" maxNote="60">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="12"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="61" minNote="61" maxNote="61">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="13"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="62" minNote="62" maxNote="62">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="14"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="63" minNote="63" maxNote="63">
+          <LAYERS>
+            <LAYER source="StarterKit/Instruments/Bass C2.wav" slice="15"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+      </CLIPS>
+    </PROGRAM>
+    <PROGRAM id="skPrg003" name="Starter Loops" type="4">
+      <CLIPS>
+        <CLIP keyNote="0" minNote="0" maxNote="0" padPlay="1">
+          <LAYERS>
+            <LAYER source="StarterKit/Loops/Drum Loop 120.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="1" minNote="1" maxNote="1" padPlay="1">
+          <LAYERS>
+            <LAYER source="StarterKit/Loops/Bass Loop 120.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="2" minNote="2" maxNote="2" padPlay="1">
+          <LAYERS>
+            <LAYER source="StarterKit/Loops/Chord Stab.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+        <CLIP keyNote="3" minNote="3" maxNote="3" padPlay="1">
+          <LAYERS>
+            <LAYER source="StarterKit/Loops/Riser.wav" slice="0"/>
+            <LAYER/>
+            <LAYER/>
+            <LAYER/>
+          </LAYERS>
+        </CLIP>
+      </CLIPS>
+    </PROGRAM>
+  </PROGRAMS>
+  <SEQUENCES>
+    <SEQUENCE id="skSeq001" name="Sequence 01" length="4" loop="1" loopStart="0" loopEnd="4" isMasterBPM="1">
+      <TRACK id="skTrk001" name="Drums" program="skPrg001" usingSequenceLength="1" length="4" level="100">
+        <NOTELIST>
+          <NOTE id="1" no="0" velocity="120" start="0" length="24"/>
+          <NOTE id="2" no="2" velocity="110" start="0" length="24"/>
+          <NOTE id="3" no="9" velocity="100" start="0" length="24"/>
+          <NOTE id="4" no="2" velocity="96" start="48" length="24"/>
+          <NOTE id="5" no="14" velocity="90" start="72" length="24"/>
+          <NOTE id="6" no="1" velocity="112" start="96" length="24"/>
+          <NOTE id="7" no="2" velocity="110" start="96" length="24"/>
+          <NOTE id="8" no="2" velocity="96" start="144" length="24"/>
+          <NOTE id="9" no="5" velocity="100" start="168" length="24"/>
+          <NOTE id="10" no="0" velocity="120" start="192" length="24"/>
+          <NOTE id="11" no="2" velocity="110" start="192" length="24"/>
+          <NOTE id="12" no="2" velocity="96" start="240" length="24"/>
+          <NOTE id="13" no="14" velocity="90" start="240" length="24"/>
+          <NOTE id="14" no="1" velocity="112" start="288" length="24"/>
+          <NOTE id="15" no="2" velocity="110" start="288" length="24"/>
+          <NOTE id="16" no="2" velocity="96" start="336" length="24"/>
+          <NOTE id="17" no="3" velocity="96" start="336" length="24"/>
+          <NOTE id="18" no="0" velocity="120" start="384" length="24"/>
+          <NOTE id="19" no="2" velocity="110" start="384" length="24"/>
+          <NOTE id="20" no="11" velocity="80" start="408" length="24"/>
+          <NOTE id="21" no="2" velocity="96" start="432" length="24"/>
+          <NOTE id="22" no="11" velocity="80" start="456" length="24"/>
+          <NOTE id="23" no="13" velocity="100" start="456" length="24"/>
+          <NOTE id="24" no="1" velocity="112" start="480" length="24"/>
+          <NOTE id="25" no="2" velocity="110" start="480" length="24"/>
+          <NOTE id="26" no="11" velocity="80" start="504" length="24"/>
+          <NOTE id="27" no="2" velocity="96" start="528" length="24"/>
+          <NOTE id="28" no="11" velocity="80" start="552" length="24"/>
+          <NOTE id="29" no="0" velocity="120" start="576" length="24"/>
+          <NOTE id="30" no="2" velocity="110" start="576" length="24"/>
+          <NOTE id="31" no="11" velocity="80" start="600" length="24"/>
+          <NOTE id="32" no="0" velocity="100" start="624" length="24"/>
+          <NOTE id="33" no="2" velocity="96" start="624" length="24"/>
+          <NOTE id="34" no="11" velocity="80" start="648" length="24"/>
+          <NOTE id="35" no="13" velocity="100" start="648" length="24"/>
+          <NOTE id="36" no="1" velocity="112" start="672" length="24"/>
+          <NOTE id="37" no="2" velocity="110" start="672" length="24"/>
+          <NOTE id="38" no="4" velocity="110" start="672" length="24"/>
+          <NOTE id="39" no="11" velocity="80" start="696" length="24"/>
+          <NOTE id="40" no="2" velocity="96" start="720" length="24"/>
+          <NOTE id="41" no="11" velocity="80" start="744" length="24"/>
+          <NOTE id="42" no="0" velocity="120" start="768" length="24"/>
+          <NOTE id="43" no="10" velocity="100" start="768" length="24"/>
+          <NOTE id="44" no="1" velocity="112" start="864" length="24"/>
+          <NOTE id="45" no="10" velocity="100" start="864" length="24"/>
+          <NOTE id="46" no="12" velocity="96" start="912" length="24"/>
+          <NOTE id="47" no="5" velocity="100" start="936" length="24"/>
+          <NOTE id="48" no="0" velocity="120" start="960" length="24"/>
+          <NOTE id="49" no="10" velocity="100" start="960" length="24"/>
+          <NOTE id="50" no="1" velocity="112" start="1056" length="24"/>
+          <NOTE id="51" no="10" velocity="100" start="1056" length="24"/>
+          <NOTE id="52" no="12" velocity="96" start="1104" length="24"/>
+          <NOTE id="53" no="0" velocity="120" start="1152" length="24"/>
+          <NOTE id="54" no="2" velocity="110" start="1152" length="24"/>
+          <NOTE id="55" no="2" velocity="96" start="1200" length="24"/>
+          <NOTE id="56" no="1" velocity="112" start="1248" length="24"/>
+          <NOTE id="57" no="2" velocity="110" start="1248" length="24"/>
+          <NOTE id="58" no="2" velocity="96" start="1296" length="24"/>
+          <NOTE id="59" no="0" velocity="120" start="1344" length="24"/>
+          <NOTE id="60" no="8" velocity="110" start="1344" length="24"/>
+          <NOTE id="61" no="7" velocity="110" start="1392" length="24"/>
+          <NOTE id="62" no="1" velocity="112" start="1440" length="24"/>
+          <NOTE id="63" no="4" velocity="110" start="1440" length="24"/>
+          <NOTE id="64" no="6" velocity="115" start="1440" length="24"/>
+          <NOTE id="65" no="15" velocity="110" start="1512" length="24"/>
+        </NOTELIST>
+      </TRACK>
+      <TRACK id="skTrk002" name="Keys" program="skPrg002" usingSequenceLength="1" length="4" level="70">
+        <NOTELIST>
+          <NOTE id="1" no="12" velocity="64" start="0" length="96"/>
+          <NOTE id="2" no="15" velocity="64" start="0" length="96"/>
+          <NOTE id="3" no="19" velocity="64" start="0" length="96"/>
+          <NOTE id="4" no="12" velocity="64" start="192" length="96"/>
+          <NOTE id="5" no="15" velocity="64" start="192" length="96"/>
+          <NOTE id="6" no="19" velocity="64" start="192" length="96"/>
+          <NOTE id="7" no="17" velocity="64" start="384" length="96"/>
+          <NOTE id="8" no="20" velocity="64" start="384" length="96"/>
+          <NOTE id="9" no="24" velocity="64" start="384" length="96"/>
+          <NOTE id="10" no="17" velocity="64" start="576" length="96"/>
+          <NOTE id="11" no="20" velocity="64" start="576" length="96"/>
+          <NOTE id="12" no="24" velocity="64" start="576" length="96"/>
+          <NOTE id="13" no="15" velocity="64" start="768" length="96"/>
+          <NOTE id="14" no="19" velocity="64" start="768" length="96"/>
+          <NOTE id="15" no="22" velocity="64" start="768" length="96"/>
+          <NOTE id="16" no="15" velocity="64" start="960" length="96"/>
+          <NOTE id="17" no="19" velocity="64" start="960" length="96"/>
+          <NOTE id="18" no="22" velocity="64" start="960" length="96"/>
+          <NOTE id="19" no="19" velocity="64" start="1152" length="96"/>
+          <NOTE id="20" no="22" velocity="64" start="1152" length="96"/>
+          <NOTE id="21" no="26" velocity="64" start="1152" length="96"/>
+          <NOTE id="22" no="19" velocity="64" start="1344" length="96"/>
+          <NOTE id="23" no="22" velocity="64" start="1344" length="96"/>
+          <NOTE id="24" no="26" velocity="64" start="1344" length="96"/>
+        </NOTELIST>
+      </TRACK>
+      <TRACK id="skTrk003" name="Loops" program="skPrg003" usingSequenceLength="1" length="4" level="80">
+        <NOTELIST>
+          <NOTE id="1" no="1" velocity="100" start="0" length="384"/>
+          <NOTE id="2" no="1" velocity="100" start="384" length="384"/>
+          <NOTE id="3" no="1" velocity="100" start="768" length="384"/>
+          <NOTE id="4" no="1" velocity="100" start="1152" length="384"/>
+        </NOTELIST>
+      </TRACK>
+    </SEQUENCE>
+    <SEQUENCE id="skSeq002" name="Sequence 02" length="2" loop="1" loopStart="0" loopEnd="2" isMasterBPM="0">
+      <TEMPOS>
+        <TEMPO bpm="100.0" num="4" den="4"/>
+      </TEMPOS>
+      <TRACK id="skTrk101" name="Drums Live" program="skPrg001" usingSequenceLength="1" length="2" level="100">
+        <NOTELIST>
+          <NOTE id="1" no="2" velocity="108" start="2" length="24"/>
+          <NOTE id="2" no="0" velocity="118" start="7" length="24"/>
+          <NOTE id="3" no="2" velocity="100" start="44" length="24"/>
+          <NOTE id="4" no="2" velocity="108" start="98" length="24"/>
+          <NOTE id="5" no="2" velocity="100" start="140" length="24"/>
+          <NOTE id="6" no="2" velocity="108" start="184" length="24"/>
+          <NOTE id="7" no="1" velocity="112" start="196" length="24"/>
+          <NOTE id="8" no="0" velocity="118" start="243" length="24"/>
+          <NOTE id="9" no="2" velocity="100" start="247" length="24"/>
+          <NOTE id="10" no="2" velocity="108" start="281" length="24"/>
+          <NOTE id="11" no="2" velocity="100" start="334" length="24"/>
+          <NOTE id="12" no="2" velocity="108" start="381" length="24"/>
+          <NOTE id="13" no="0" velocity="118" start="385" length="24"/>
+          <NOTE id="14" no="2" velocity="100" start="426" length="24"/>
+          <NOTE id="15" no="2" velocity="108" start="481" length="24"/>
+          <NOTE id="16" no="2" velocity="100" start="536" length="24"/>
+          <NOTE id="17" no="1" velocity="112" start="574" length="24"/>
+          <NOTE id="18" no="2" velocity="108" start="574" length="24"/>
+          <NOTE id="19" no="2" velocity="100" start="617" length="24"/>
+          <NOTE id="20" no="0" velocity="118" start="633" length="24"/>
+          <NOTE id="21" no="2" velocity="108" start="664" length="24"/>
+          <NOTE id="22" no="2" velocity="100" start="713" length="24"/>
+          <NOTE id="23" no="3" velocity="96" start="713" length="24"/>
+        </NOTELIST>
+      </TRACK>
+      <TRACK id="skTrk102" name="Loops" program="skPrg003" usingSequenceLength="1" length="2" level="80">
+        <NOTELIST>
+          <NOTE id="1" no="0" velocity="100" start="0" length="384"/>
+        </NOTELIST>
+      </TRACK>
+    </SEQUENCE>
+  </SEQUENCES>
+</ROOT>

@@ -1,0 +1,18 @@
+Kick Starter Kit - CC0 1.0 Universal (Public Domain Dedication)
+
+The audio files in this directory (Kit/, Instruments/, Loops/, Metronome/) and the
+"Starter Kit" demo project and thumbnail in Kick/demos/Starter Kit/ were synthesised from
+scratch by Kick/tools/make_starter_kit.py: fixed-seed noise and oscillators, envelopes and
+filters written in plain Python. No recordings, sample libraries or third-party sounds were
+used. Run the script again to regenerate identical files.
+
+To the extent possible under law, the contributors have waived all copyright and related or
+neighboring rights to these files. They are dedicated to the public domain under the
+Creative Commons CC0 1.0 Universal Public Domain Dedication:
+
+    https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+You can copy, modify, distribute and use them, including for commercial purposes, without
+asking permission and without attribution.
+
+The files are provided "as is", without warranty of any kind.

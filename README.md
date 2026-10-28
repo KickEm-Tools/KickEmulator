@@ -29,21 +29,29 @@ Both modes use the same panel and the same checks.
 
 Every result the emulator reports says which mode produced it and what that mode cannot tell you.
 
-## Usage (planned)
+## Usage
 
 ```sh
+./kickem fetch --firmware <url|path> --ref <branch|tag|full sha>   # works today
 ./kickem run --firmware https://github.com/KickEm-Tools/0700-AAM.git --ref main --mode fast
-./kickem fetch --firmware <url> --ref <branch|tag|sha>      # works today
 ```
 
-Only one emulator instance runs per machine (one audio device, one panel). The launcher holds a
-machine-wide lock, as the in-tree simulator's `sim_launch.sh` did with `/tmp/kt_kickem.lock`.
+`fetch` clones or updates the ref, shallowly, into `$KICKEM_CACHE` (else `~/.cache/kickem`). It
+prints the commit and the checkout path, which you can pass to CMake as `-DKICKEM_FIRMWARE_DIR`.
+`run` parses its arguments, fetches, and takes the lock. It then says that building and running
+come in phase 5 (`fast`) or phase 6 (`vm`), and exits with status 3.
+
+Only one emulator instance runs per machine (one audio device, one panel). `run` holds a
+machine-wide lock, `$KICKEM_LOCK`, by default `/tmp/kt_kickem.lock`. It is the same lock, in the
+same format, as the in-tree simulator's `sim_launch.sh`, so the two never run at once. A lock
+whose owner has died is reclaimed. Otherwise `run` waits up to `$KICKEM_LOCK_WAIT` seconds
+(default 1800).
 
 ## Status
 
 | Phase (`/goal-standalone`) | What | State |
 |---|---|---|
-| 4 | This repository: licence, layout, the firmware fetch, protocol targets from the fetched ref, `protocol_roundtrip`, the Starter Kit, `kickem fetch` | in progress |
+| 4 | This repository: licence, layout, the firmware fetch, protocol targets from the fetched ref, `protocol_roundtrip`, the Starter Kit, `kickem fetch` | done |
 | 5 | Fast mode: the panel speaks `CPktMgr` over a pty to the fork's desktop `Kick`; `kickem run --mode fast`; the checks ported to the wire | not started |
 | 6 | Faithful mode: QEMU arm64 VM with the fork's `KT_Kick-linux-arm64`, panel on the VM's serial port | not started |
 | 7 | Reusable CI workflow for forks (`test-firmware.yml`), panel release builds | not started |
@@ -55,21 +63,22 @@ machine-wide lock, as the in-tree simulator's `sim_launch.sh` did with `/tmp/kt_
 | `panel/` | The front panel. Imported from the in-tree simulator; still links the firmware app until phase 5 (see `panel/README.md`) |
 | `transport/` | pty, TCP and serial transports for the panel (interfaces only so far) |
 | `cmake/` | `KickemFirmware.cmake`: fetches the firmware by URL and ref, and exposes the protocol targets |
-| `tools/protocol_roundtrip/` | Encodes and decodes a BUTTON and a PAD packet with the fetched ref's `CPktMgr` |
+| `tools/protocol_roundtrip/` | Encodes a BUTTON and a PAD packet with the fetched ref's `CPktMgr` and decodes them as the app's serial reader does, plus an LED packet the other way |
 | `modes/fast/`, `modes/vm/` | The two modes (plans so far) |
 | `checks/` | The in-tree simulator's check scripts, not ported yet (see `checks/README.md`) |
 | `content/StarterKit/` | The Starter Kit: synthesised samples and a demo project, CC0 |
-| `kickem` | The launcher |
+| `kickem` | The launcher (`fetch` works; `run` stops after the fetch and the lock until phase 5) |
+| `.github/workflows/` | Empty until phase 7 |
 
 ## Building the protocol tool
 
 ```sh
-# macOS needs a deployment target: the firmware's JUCE build does not configure without one.
+# On macOS, as for the firmware build (it matters once JUCE is built, -DKICKEM_PROTOCOL_JUCE=juce):
 export MACOSX_DEPLOYMENT_TARGET=12.0
 cmake -S . -B build                                   # fetches KickEm-Tools/0700-AAM main
 cmake -S . -B build -DKICKEM_FIRMWARE_URL=<url> -DKICKEM_FIRMWARE_REF=<ref>
 cmake -S . -B build -DKICKEM_FIRMWARE_DIR=/path/to/your/0700-AAM   # a local checkout
-cmake --build build && ./build/tools/protocol_roundtrip/protocol_roundtrip
+cmake --build build && ./build/tools/protocol_roundtrip/protocol_roundtrip    # prints the bytes, PASS
 ```
 
 See `cmake/README.md` for the options, including how the JUCE include in

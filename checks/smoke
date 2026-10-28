@@ -1,0 +1,173 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Smoke test: build the firmware ref and the panel, boot them connected over the wire, load the
+# Starter Kit with PUSH, play four bars, stop, and check that the engine made sound and the panel
+# got its LED and pad-colour feedback over the serial link.
+#
+#   checks/smoke [--mode fast] [--firmware URL|PATH] [--ref REF] [--no-build] [OUTDIR]
+#
+# Default firmware: KickEm-Tools/0700-AAM main; default OUTDIR: checks/out/smoke. Exit status 0
+# when every check passes, 1 otherwise, 3 for a mode that does not exist yet (vm: phase 6).
+# Evidence is left in OUTDIR: kick.log (the app), panel.log (the panel, SimSerial: / SimSurface:
+# lines), probe.wav (the master output), loaded.png / playing.png (the screen) and
+# loaded-panel.png / playing-panel.png (the panel).
+#
+# Ported from the in-tree simulator's Kick/tools/sim_smoke.sh (docs/DEVELOPMENT.md 4.10 on
+# rbdone/goal-simulator-controls), with the same pass criteria. Panel input goes over the wire
+# (the panel's control channel), the screen through the firmware's KICK_TEST_CONTROL, audio
+# through KICK_AUDIO_PROBE, and the audio input is silence. Works with the Mac's screen locked.
+set -u
+CHECKS=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$CHECKS/.." && pwd)
+MODE=fast
+RUN_ARGS=""
+NO_BUILD=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --mode) MODE=$2; shift 2 ;;
+        --firmware) RUN_ARGS="$RUN_ARGS --firmware $2"; shift 2 ;;
+        --ref) RUN_ARGS="$RUN_ARGS --ref $2"; shift 2 ;;
+        --no-build) NO_BUILD=--no-build; shift ;;
+        -h|--help) sed -n '4,20p' "$0"; exit 0 ;;
+        -*) echo "smoke: unknown option $1" >&2; exit 2 ;;
+        *) break ;;
+    esac
+done
+OUT=${1:-$CHECKS/out/smoke}
+mkdir -p "$OUT"
+OUT=$(cd "$OUT" && pwd)
+RUN="$OUT/run"
+CTL="$CHECKS/lib/kickem_ctl"
+export KICKEM_RUN_DIR="$RUN"
+FAILS=0
+
+say()  { printf '%s\n' "$*"; }
+pass() { say "PASS  $*"; }
+fail() { say "FAIL  $*"; FAILS=$((FAILS + 1)); }
+now()  { python3 -c 'import time; print("%.3f" % time.time())'; }
+
+say "== smoke, mode $MODE"
+case "$MODE" in
+    fast) say "   cannot tell you: anything Linux-specific (systemd units, scripts, device nodes, the Wi-Fi /"
+          say "   Ethernet / CV / update screens); timing and CPU load are this computer's, not the unit's." ;;
+    vm) say "SKIP  --mode vm (faithful mode) comes in phase 6"; exit 3 ;;
+    *) say "smoke: --mode fast|vm"; exit 2 ;;
+esac
+
+KLOG="$RUN/kick.log"
+PLOG="$RUN/panel.log"
+# Lines of a log after the marker written by "kickem_ctl echo MARKER" (and before the next one).
+after()   { sed -n "/^$1: echo $2\$/,\$p" "$3"; }
+between() { sed -n "/^$1: echo $2\$/,/^$1: echo $3\$/p" "$4"; }
+# Per-second peaks (dBFS) from AudioProbe lines on stdin.
+peaks()   { sed -n 's/^AudioProbe: t=[0-9]*s peak=\(-*[0-9.]*\)dBFS.*/\1/p'; }
+
+cleanup() {
+    "$ROOT/kickem" stop --out "$RUN" >/dev/null 2>&1
+    for f in kick.log panel.log; do [ -f "$RUN/$f" ] && cp "$RUN/$f" "$OUT/$f"; done
+}
+trap cleanup EXIT
+trap 'exit 1' INT TERM
+
+#### 1. Build and boot, fresh demos / templates / prefs ########################################
+rm -rf "$RUN" "$OUT"/*.png "$OUT/probe.wav"
+T0=$(now)
+say "== kickem run$RUN_ARGS (log: $OUT/kickem.log)"
+# shellcheck disable=SC2086
+KICK_SIM_LOG_SURFACE=1 "$ROOT/kickem" run $RUN_ARGS $NO_BUILD --fresh --detach --probe "$OUT/probe.wav" --out "$RUN" \
+    > "$OUT/kickem.log" 2>&1
+STATUS=$?
+if [ "$STATUS" -ne 0 ]; then
+    tail -15 "$OUT/kickem.log" | sed 's/^/      /'
+    fail "kickem run (exit $STATUS), see $OUT/kickem.log"
+    say ""; say "SMOKE FAILED: could not build or boot this ref"
+    exit 1
+fi
+T_LIVE=$(now)
+BUILD_S=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["build_s"])' "$RUN/state.json")
+KPID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["kick_pid"])' "$RUN/state.json")
+COMMIT=$(python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(s["firmware"], s["ref"], s["commit"])' "$RUN/state.json")
+say "   firmware $COMMIT"
+if grep -q "Send Comm Live" "$KLOG" && grep -q "^SimSerial: LIVE" "$PLOG"; then
+    pass "handshake over $(sed -n 's/^SimSerial: listening on //p' "$PLOG" | head -1): app 'Send Comm Live', panel '$(grep -m1 '^SimSerial: LIVE' "$PLOG" | sed 's/^SimSerial: //')'"
+else
+    fail "handshake"
+fi
+
+PROJECT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["kick_build"])' "$RUN/state.json")/demos/Starter Kit/Starter Kit.kickPrj"
+BPM=$(sed -n 's/.*bpm="\([0-9.]*\)".*/\1/p' "$PROJECT" 2>/dev/null | head -1)
+BPM=${BPM:-120}
+FOUR_BARS=$(awk -v b="$BPM" 'BEGIN { printf "%.1f", 4 * 4 * 60 / b }')
+
+#### 2. PUSH loads the Starter Kit ###############################################################
+"$CTL" echo SMOKE_LOAD >/dev/null
+"$CTL" press PUSH >/dev/null || fail "PUSH not delivered"
+LOADED='^Project: loaded .*/Starter Kit\(/Starter Kit.kickPrj\)\{0,1\}$'
+i=0
+until grep -q "$LOADED" "$KLOG"; do
+    i=$((i + 1)); [ "$i" -ge 40 ] && break; sleep 0.5
+done
+if grep -q "$LOADED" "$KLOG"; then pass "PUSH loaded Starter Kit ($(grep -m1 "$LOADED" "$KLOG" | sed 's/^Project: loaded //'))"; else fail "PUSH did not load Starter Kit"; fi
+sleep 2
+"$CTL" shot "$OUT/loaded.png" >/dev/null || fail "shot loaded.png"
+if after PanelControl SMOKE_LOAD "$PLOG" | grep -q "^SimSurface: PAD cmd=6 "; then
+    pass "pad colours arrived over the wire after load ($(after PanelControl SMOKE_LOAD "$PLOG" | grep -c '^SimSurface: PAD ') PAD packets)"
+else
+    fail "no pad colour packet (PAD cmd=6) after load"
+fi
+QUIET=$(after TestControl SMOKE_LOAD "$KLOG" | grep "^AudioProbe:" | tail -1 | peaks)
+if [ -n "$QUIET" ] && awk -v p="$QUIET" 'BEGIN { exit !(p < -60) }'; then pass "silent before PLAY (peak $QUIET dBFS)"; else fail "not silent before PLAY (peak ${QUIET:-?} dBFS)"; fi
+
+#### 3. PLAY four bars, STOP ######################################################################
+"$CTL" echo SMOKE_PLAY >/dev/null
+T_PLAY=$(now)
+"$CTL" press PLAY >/dev/null || fail "PLAY not delivered"
+# Wait out the four bars, noting when the first loud second of audio is logged.
+T_SOUND=""
+END=$(awk -v t="$T_PLAY" -v d="$FOUR_BARS" 'BEGIN { printf "%.3f", t + d }')
+while awk -v n="$(now)" -v e="$END" 'BEGIN { exit !(n < e) }'; do
+    if [ -z "$T_SOUND" ] && after TestControl SMOKE_PLAY "$KLOG" | grep "^AudioProbe:" | peaks | awk '$1 > -40 { f = 1 } END { exit !f }'; then
+        T_SOUND=$(now)
+    fi
+    sleep 0.1
+done
+"$CTL" shot "$OUT/playing.png" >/dev/null || fail "shot playing.png"
+"$CTL" echo SMOKE_STOP >/dev/null
+"$CTL" press STOP >/dev/null || fail "STOP not delivered"
+sleep 3
+"$CTL" echo SMOKE_END >/dev/null
+sleep 0.5
+
+kill -0 "$KPID" 2>/dev/null && pass "Kick still running (pid $KPID)" || fail "Kick exited (crash?)"
+
+#### 4. Checks ######################################################################################
+# LEDs, from the panel's side of the wire: the app lights PLAY when the transport runs and STOP
+# when it stops.
+if between PanelControl SMOKE_PLAY SMOKE_STOP "$PLOG" | grep -q "^SimSurface: LED cmd=0 data=45,1"; then pass "PLAY LED on (LED packet 45,1 over the wire)"; else fail "no PLAY LED packet after PLAY"; fi
+if between PanelControl SMOKE_STOP SMOKE_END "$PLOG" | grep -q "^SimSurface: LED cmd=0 data=44,1"; then pass "STOP LED on (LED packet 44,1 over the wire)"; else fail "no STOP LED packet after STOP"; fi
+
+# Audio: every whole second of the four bars has sound, nothing clips, and STOP silences it.
+PLAYING=$(between TestControl SMOKE_PLAY SMOKE_STOP "$KLOG" | grep "^AudioProbe:" | sed 1d | peaks)
+N=$(printf '%s\n' "$PLAYING" | grep -c .)
+LOUD=$(printf '%s\n' "$PLAYING" | awk '$1 > -40' | grep -c .)
+MAX=$(printf '%s\n' "$PLAYING" | sort -g | tail -1)
+if [ "$N" -ge 3 ] && [ "$LOUD" -eq "$N" ]; then pass "sound during playback: $LOUD/$N seconds above -40 dBFS"; else fail "sound during playback: only $LOUD/$N seconds above -40 dBFS"; fi
+if [ -n "$MAX" ] && awk -v p="$MAX" 'BEGIN { exit !(p <= 0) }'; then pass "no clipping (max peak $MAX dBFS)"; else fail "master clipped (max peak ${MAX:-?} dBFS)"; fi
+LAST=$(between TestControl SMOKE_STOP SMOKE_END "$KLOG" | grep "^AudioProbe:" | tail -1 | peaks)
+if [ -n "$LAST" ] && awk -v p="$LAST" 'BEGIN { exit !(p < -60) }'; then pass "silent after STOP (peak $LAST dBFS)"; else fail "not silent after STOP (peak ${LAST:-?} dBFS)"; fi
+
+#### 5. Timing ######################################################################################
+# Sound is detected when the probe logs its first loud second, so it began up to 1 s earlier.
+if [ -n "$T_SOUND" ]; then
+    awk -v t0="$T0" -v l="$T_LIVE" -v p="$T_PLAY" -v s="$T_SOUND" -v b="$BUILD_S" 'BEGIN {
+        printf "TIME  kickem run to LIVE %.1f s (fetch + build + install %.1f s); PLAY pressed at %.1f s; sound logged at %.1f s,\n", l - t0, b, p - t0, s - t0
+        printf "      that is %.1f s after the build (sound began up to 1 s before it was logged)\n", s - t0 - b }'
+fi
+
+say ""
+say "evidence: $OUT (kick.log, panel.log, probe.wav, loaded*.png, playing*.png, kickem.log)"
+say "mode fast: says nothing about the device's Linux build; see README 'What each mode cannot tell you'"
+if [ "$FAILS" -eq 0 ]; then say "SMOKE OK"; exit 0; fi
+say "SMOKE FAILED: $FAILS check(s)"
+exit 1

@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""kickem_ctl: drive a running emulator (started with `kickem run`). Successor of the in-tree
+simulator's sim_ctl.sh. Panel commands go to the panel's control channel, which sends real
+CPktMgr frames over the wire; screen commands go to the firmware's KICK_TEST_CONTROL module.
+
+Panel (acked as "PanelControl: ok <n>" in the panel log):
+    press NAME...            controls by printed name: "Pad 1", MAIN, PUSH, PLAY, STOP, RECORD,
+                             OVERDUB, "PLAY START", BACK, "key 45"; a caption such as GRID or
+                             PREFS performs that SHIFT function
+    down NAME [VEL]          press a pad or key and keep it held (pads: velocity 1..127)
+    up NAME                  release it
+    hold NAME SECS [VEL]     down, wait SECS, up (answers after the release)
+    turn KNOB STEPS          encoder P1..P4 or JOG, signed detents (one packet each)
+    slider VALUE             the slider, 0..100
+    repeat MS N NAME         press a panel control N times, MS ms apart (timed in the panel)
+    panelshot OUT.png        render the panel
+    link                     the link's state and frame counters
+Screen (acked as "TestControl: ok <n>" in the app log; needs feature/desktop-seams):
+    tap X Y                  touch pixel (X,Y) of the 1024x600 screen
+    click NAME...            on-screen components by title ("WiFi", "Resources")
+    clickat NAME FX FY       touch a titled component at a fraction of its size
+    list [FILTER]            titled components on the screen
+    shot OUT.png             render the screen (popups included) to OUT.png, and the panel to
+                             OUT-panel.png
+    windows                  the main window, overlays, other windows
+    status                   transport state, BAR:BEAT:TICK, tempo, metronome
+Both:
+    echo TEXT                write a marker line into both logs
+
+The run is found through <run dir>/state.json ($KICKEM_RUN_DIR, else $KICKEM_CACHE/run, else
+~/.cache/kickem/run). Waits $KICKEM_CTL_TIMEOUT seconds (default 15) for each answer. Exit
+status 1 on an error or a timeout, 2 on bad usage.
+"""
+import json
+import os
+import shlex
+import sys
+import time
+
+TIMEOUT = float(os.environ.get("KICKEM_CTL_TIMEOUT", "15"))
+
+
+def run_dir():
+    if os.environ.get("KICKEM_RUN_DIR"):
+        return os.environ["KICKEM_RUN_DIR"]
+    base = os.environ.get("KICKEM_CACHE") or os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "kickem")
+    return os.path.join(base, "run")
+
+
+def die(msg, code=1):
+    print("kickem_ctl: " + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def load_state():
+    path = os.path.join(run_dir(), "state.json")
+    try:
+        with open(path) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        die("no running emulator (%s missing); start one with `kickem run --detach`" % path)
+    return st
+
+
+class Channel:
+    def __init__(self, name, ctl, log, pid, prefix):
+        self.name, self.ctl, self.log, self.pid, self.prefix = name, ctl, log, pid, prefix
+        self.seqfile = ctl + ".seq"
+
+    def lines(self):
+        try:
+            with open(self.log, errors="replace") as f:
+                return f.read().splitlines()
+        except OSError:
+            return []
+
+    def send(self, line, timeout=TIMEOUT):
+        """Appends '<seq> <line>' and waits for the ack; returns this channel's log lines for it."""
+        if not alive(self.pid):
+            die("%s (pid %d) is not running" % (self.name, self.pid))
+        try:
+            seq = int(open(self.seqfile).read().strip() or 0) + 1
+        except (OSError, ValueError):
+            seq = 1
+        with open(self.seqfile, "w") as f:
+            f.write("%d\n" % seq)
+        start = len(self.lines())
+        with open(self.ctl, "a") as f:
+            f.write("%d %s\n" % (seq, line))
+        ok, err = "%s: ok %d" % (self.prefix, seq), "%s: error %d" % (self.prefix, seq)
+        end = time.monotonic() + timeout
+        while True:
+            new = self.lines()[start:]
+            for i, l in enumerate(new):
+                if l == ok or l.startswith(ok + " "):
+                    return [x for x in new[:i] if x.startswith(self.prefix + ": ")]
+                if l == err or l.startswith(err + " "):
+                    die(l)
+            if not alive(self.pid):
+                die("%s exited while answering '%s'" % (self.name, line))
+            if time.monotonic() > end:
+                die("no answer from the %s to '%s' after %.0f s (message thread blocked?)" % (self.name, line, timeout))
+            time.sleep(0.05)
+
+
+def q(s):
+    return '"%s"' % s
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    st = load_state()
+    panel = Channel("panel", st["panel_control"], st["panel_log"], st["panel_pid"], "PanelControl")
+    screen = Channel("Kick app", st["test_control"], st["kick_log"], st["kick_pid"], "TestControl")
+    cmd, args = argv[0], argv[1:]
+
+    def out(lines, tag):
+        for l in lines:
+            p = "%s: %s " % (l.split(":", 1)[0], tag)
+            if l.startswith(p):
+                print(l[len(p):])
+
+    if cmd == "press":
+        for name in args:
+            panel.send("press " + q(name))
+    elif cmd in ("down", "up"):
+        if not args:
+            return 2
+        panel.send("%s %s %s" % (cmd, q(args[0]), " ".join(args[1:])))
+    elif cmd == "hold":
+        if len(args) < 2:
+            return 2
+        panel.send("hold %s %s" % (q(args[0]), " ".join(args[1:])), timeout=TIMEOUT + float(args[1]) + 1)
+    elif cmd == "turn" and len(args) == 2:
+        panel.send("turn %s %s" % (args[0], args[1]))
+    elif cmd == "slider" and len(args) == 1:
+        panel.send("slider %s" % args[0])
+    elif cmd == "repeat" and len(args) >= 3:
+        ms, n = int(args[0]), int(args[1])
+        out(panel.send("repeat %d %d %s" % (ms, n, q(" ".join(args[2:]))), timeout=TIMEOUT + ms * n / 1000.0 + 1), "repeat")
+    elif cmd == "panelshot" and len(args) == 1:
+        out(panel.send("shot " + q(os.path.abspath(args[0]))), "shot")
+    elif cmd == "link":
+        out(panel.send("link"), "link")
+    elif cmd == "tap" and len(args) == 2:
+        screen.send("tap %s %s" % tuple(args))
+    elif cmd == "click":
+        for name in args:
+            screen.send("click " + q(name))
+    elif cmd == "clickat" and len(args) == 3:
+        screen.send("clickat %s %s %s" % (q(args[0]), args[1], args[2]))
+    elif cmd == "list":
+        out(screen.send("list " + q(" ".join(args)) if args else "list"), "item")
+    elif cmd == "shot" and len(args) == 1:
+        target = os.path.abspath(args[0])
+        out(screen.send("shot " + q(target)), "shot")
+        root, _ = os.path.splitext(target)
+        out(panel.send("shot " + q(root + "-panel.png")), "shot")
+    elif cmd == "windows":
+        out(screen.send("windows"), "window")
+    elif cmd == "status":
+        out(screen.send("status"), "status")
+    elif cmd == "echo":
+        text = " ".join(args)
+        screen.send("echo " + text)
+        panel.send("echo " + text)
+    else:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

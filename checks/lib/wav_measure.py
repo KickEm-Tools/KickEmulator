@@ -3,7 +3,7 @@
 
 Reads a PCM16/24/32 or float32 WAV (no scipy), prints length, peak, RMS, and optionally
 the onset times of bursts (first sample whose |x| crosses the threshold after >= 20 ms
-of silence). Used to measure the audio probe (KICK_SIM_AUDIO_PROBE) and recorded samples;
+of silence). Used to measure the audio probe (KICK_AUDIO_PROBE) and recorded samples;
 needs numpy."""
 import struct, sys
 import numpy as np

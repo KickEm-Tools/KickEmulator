@@ -16,9 +16,9 @@ The files were imported unchanged from the in-tree simulator (`Kick/apps/kickem/
 | `kick_SimControl.{h,cpp}` | The scripting channel (`KICK_SIM_CONTROL=<file>`, driven by `checks/sim_ctl.sh`). It has a panel half and a screen half, see below |
 | `kick_SimulatorInterfaceImpl.{h,cpp}` | The in-memory seam: `SimulatorHub` passes `CPktMgr::HWMsg_t` between the panel and the app's `input_events` through `Factory<SimulatorInterface>` (`SIM_BUILD`) |
 
-The edit: the logo above the screen comes only from `sim::Simulator::logoFile`, which phase 5's
-`--logo <png>` sets. It used to be the theme asset `Sim Behringer Logo.png`, a trademark that this
-repository does not ship. With no file set, nothing is drawn. The change was compiled with
+The edit: the panel draws no logo. On the work branch it printed the theme asset `Sim Behringer
+Logo.png` above the screen, or the word "behringer" without it; both are trademarks, so that area
+is left blank and there is no option to add one. The change was compiled with
 `-fsyntax-only` against the firmware work branch's `KT_KickEM` flags (`compile_commands.json`).
 
 **This directory does not build on its own yet**, and the top-level CMake does not build it.
@@ -37,7 +37,7 @@ These are the dependencies phase 5 removes. Each one is listed with what it beco
 | `SimulatorHub::sendToApp()` / `fromApp`, `SimulatorInterfaceImpl`, `REGISER_FACTORY( SimulatorInterface, ... )`, `input_events/kick_SimulatorInterface.h`, `common/common.h`, `sigslot` | `kick_SimulatorInterfaceImpl.*`, every `send*` in `kick_Simulator.cpp` | Replaced by a `PanelLink`. It frames each `HWMsg_t` with `CPktMgr::BuildAndTransmitPacket` from the fetched ref and writes it to a `transport/` (pty, TCP, serial). It reads the app's frames back with `CPktMgr::PushByteToRxFifo` and turns them into `handleFromApp()`. The in-memory files are deleted |
 | Screen half of `SimControl`: `click`, `tap`, `clickat`, `list`, `windows`, `status`, the screen part of `shot`, `ui::simFocusTarget()`, `statusProvider` (set by the app's `Main.cpp` from the engine) | `kick_SimControl.cpp` | Moves to the firmware as the generic, opt-in `KICK_TEST_CONTROL` module (`Kick/modules/test_control`, decision 1 in `docs/STANDALONE_SPLIT.md`). Faithful mode uses QEMU input injection instead |
 | Panel half of `SimControl`: `press`, `down`, `up`, `hold`, `turn`, `slider`, `repeat`, `echo`, the panel part of `shot` | `kick_SimControl.cpp` | Stays here as the panel's own control channel. It drives the panel's controls, which send packets over the wire |
-| The app's `Main.cpp`, which runs the app and the panel in one process with one message loop | not imported (work branch `Kick/apps/kickem/Main.cpp`) | The panel gets its own `main`: window, `--logo`, `--transport pty\|tcp:<host:port>\|serial:<dev>`, the control channel, and the machine-wide lock |
+| The app's `Main.cpp`, which runs the app and the panel in one process with one message loop | not imported (work branch `Kick/apps/kickem/Main.cpp`) | The panel gets its own `main`: window, `--transport pty\|tcp:<host:port>\|serial:<dev>`, the control channel, and the machine-wide lock |
 
 Protocol details phase 5 must match. These were read from the firmware's
 `Kick/modules/input_events/input_events.cpp` and `ComProtocol/PktMgr/PktMgr.cpp`, and

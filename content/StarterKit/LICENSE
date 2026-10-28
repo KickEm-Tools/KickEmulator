@@ -1,15 +1,15 @@
 Kick Starter Kit - CC0 1.0 Universal (Public Domain Dedication)
 
-The audio files in this directory (samples/Kit/, samples/Instruments/, samples/Loops/,
-samples/Metronome/), the "Starter Kit" demo project and thumbnail in demos/Starter Kit/, and the
-Projects-screen tile in recent_project/ were synthesised from scratch by make_starter_kit.py:
-fixed-seed noise and oscillators, envelopes and filters written in plain Python. No recordings,
-sample libraries or third-party sounds were used. Run the script again to regenerate identical
-files.
+This dedication covers the generator script make_starter_kit.py and everything it writes: the
+audio files (samples/Kit/, samples/Instruments/, samples/Loops/, samples/Metronome/), the
+"Starter Kit" demo project and thumbnail in demos/Starter Kit/, and the Projects-screen tile in
+recent_project/. All of it was synthesised from scratch by the script: fixed-seed noise and
+oscillators, envelopes and filters written in plain Python. No recordings, sample libraries or
+third-party sounds were used. Run the script again to regenerate identical files.
 
 To the extent possible under law, the contributors have waived all copyright and related or
-neighboring rights to these files. They are dedicated to the public domain under the
-Creative Commons CC0 1.0 Universal Public Domain Dedication:
+neighboring rights to the script and these files. They are dedicated to the public domain
+under the Creative Commons CC0 1.0 Universal Public Domain Dedication:
 
     https://creativecommons.org/publicdomain/zero/1.0/legalcode
 

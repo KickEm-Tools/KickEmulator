@@ -3,7 +3,7 @@
 """kickem: run a Kick firmware fork against the emulated front panel.
 
     ./kickem fetch [--firmware URL] [--ref REF]
-    ./kickem run   [--firmware URL] [--ref REF] [--mode fast|vm] [--logo PNG]
+    ./kickem run   [--firmware URL] [--ref REF] [--mode fast|vm]
 
 fetch clones or updates REF of URL into the cache ($KICKEM_CACHE, else $XDG_CACHE_HOME/kickem,
 else ~/.cache/kickem) and prints the checkout's path and commit. Pass that path to CMake as
@@ -208,8 +208,6 @@ def cmd_fetch(a):
 
 
 def cmd_run(a):
-    if a.logo and not os.path.isfile(a.logo):
-        die("--logo %s: no such file" % a.logo, 2)
     path, commit = fetch(a.firmware, a.ref, force=a.force)
     acquire_lock()
     try:
@@ -238,7 +236,6 @@ def main(argv=None):
     r = sub.add_parser("run", help="fetch, build and run the firmware against the panel")
     common(r)
     r.add_argument("--mode", choices=("fast", "vm"), default="fast", help="fast: desktop build over a pty; vm: Linux arm64 in QEMU (default: %(default)s)")
-    r.add_argument("--logo", metavar="PNG", help="logo the panel prints above the screen (none is shipped)")
     r.set_defaults(func=cmd_run)
 
     a = p.parse_args(argv)

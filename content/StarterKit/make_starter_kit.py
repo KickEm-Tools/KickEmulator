@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: CC0-1.0 (this script and everything it writes; see LICENSE beside it)
 """Synthesise the Kick starter content: a drum kit, two tonal instruments, two loops, a metronome
 click set, and the "Starter Kit" demo project that uses them.
 
 Everything is generated from fixed seeds with the Python standard library only, so the output is
-byte-for-byte reproducible and clearly ours to ship (CC0, see LICENSE beside this script).
+byte-for-byte reproducible and clearly ours to ship. The script and its output are CC0 (see LICENSE beside it).
 
     python3 content/StarterKit/make_starter_kit.py             # rewrites the files below
     python3 content/StarterKit/make_starter_kit.py --out DIR   # writes the same tree under DIR

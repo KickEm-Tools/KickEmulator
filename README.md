@@ -87,10 +87,10 @@ See `cmake/README.md` for the options, including how the JUCE include in
 ## Content and branding
 
 - **Starter Kit.** `content/StarterKit/` is synthesised from scratch by `make_starter_kit.py`
-  (fixed seeds, Python standard library only) and is dedicated to the public domain under CC0 1.0.
+  (fixed seeds, Python standard library only) and is dedicated to the public domain under CC0 1.0, generator included.
   Its `LICENSE` sits beside it. Running the script reproduces the committed files byte for byte.
-- **No logo.** The emulator ships no manufacturer artwork. The panel draws a logo above the
-  screen only from a PNG you supply (`--logo <png>`); without one it draws nothing there.
+- **No logo.** The emulator draws no manufacturer logo or other trademarks: the area above the
+  screen, where the unit carries its logo, is left blank.
 - Never committed: firmware build outputs, VM disk images, Buildroot downloads, NXP firmware or
   driver blobs (see `.gitignore`).
 

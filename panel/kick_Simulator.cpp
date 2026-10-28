@@ -501,7 +501,6 @@ namespace sim
     Simulator::Simulator()
     {
         setOpaque( true );
-        loadLogo();
 
         // The real device screen, scaled into the bezel cut-out (see resized()).
         addAndMakeVisible( kick_ui::KickHome::Instance() );
@@ -636,31 +635,6 @@ namespace sim
         removeChildComponent( &home );
         for( auto* s : { &master, &rec } )
             s->setLookAndFeel( nullptr );
-    }
-
-    void Simulator::loadLogo()
-    {
-        // The artwork is dark on white; turn darkness into alpha so it prints in panel grey on the
-        // black bezel, then crop to the mark.
-        if( !logoFile.existsAsFile() ) return;
-        auto src = juce::ImageCache::getFromFile( logoFile );
-        if( !src.isValid() ) return;
-
-        juce::Image out( juce::Image::ARGB, src.getWidth(), src.getHeight(), true );
-        juce::Rectangle<int> box;
-        {
-            juce::Image::BitmapData in( src, juce::Image::BitmapData::readOnly );
-            juce::Image::BitmapData o( out, juce::Image::BitmapData::writeOnly );
-            for( int y = 0; y < src.getHeight(); ++y )
-                for( int x = 0; x < src.getWidth(); ++x )
-                {
-                    const auto p = in.getPixelColour( x, y );
-                    const auto a = juce::jlimit( 0.f, 1.f, ( 1.f - p.getBrightness() ) * p.getFloatAlpha() * 1.15f );
-                    o.setPixelColour( x, y, print.withAlpha( a ) );
-                    if( a > 0.05f ) box = box.isEmpty() ? juce::Rectangle<int>( x, y, 1, 1 ) : box.getUnion( { x, y, 1, 1 } );
-                }
-        }
-        logo = box.isEmpty() ? out : out.getClippedImage( box.expanded( 2 ) );
     }
 
     SurfaceButton& Simulator::addButton( const juce::String& Caption, int Id, juce::Colour Led, bool Toggle, SurfaceButton::Shape S, SurfaceButton::Icon I )
@@ -859,23 +833,14 @@ namespace sim
         g.setGradientFill( juce::ColourGradient( juce::Colour( 0xff232323 ), 0.f, 0.f, juce::Colour( 0xff191919 ), 0.f, (float)getHeight(), false ) );
         g.fillRoundedRectangle( bodyRect, 20.f );
 
-        // Display bezel with the printed logos.
+        // Display bezel.
         auto bezelRect = juce::Rectangle<float>( 200.f, 30.f, 840.f, 530.f );
         g.setColour( juce::Colours::black.withAlpha( 0.5f ) );
         g.fillRoundedRectangle( bezelRect.expanded( 2.f ), 10.f );
         g.setColour( bezel );
         g.fillRoundedRectangle( bezelRect, 8.f );
-        if( logo.isValid() )
-        {
-            const float h = 30.f, w = h * (float)logo.getWidth() / (float)logo.getHeight();
-            g.drawImage( logo, juce::Rectangle<float>( w, h ).withCentre( { bezelRect.getCentreX(), bezelRect.getY() + 32.f } ), juce::RectanglePlacement::centred );
-        }
-        else
-        {
-            g.setColour( print );
-            g.setFont( panelFont( 22.f, false ).italicised() );
-            g.drawText( "behringer", bezelRect.withHeight( 60.f ), juce::Justification::centred );
-        }
+        // The area above the screen, where the unit prints the manufacturer's logo, is left blank:
+        // the emulator draws no trademarks.
         g.setColour( print );
         g.setFont( panelFont( 20.f ) );
         g.drawText( "KICK", bezelRect.withTop( bezelRect.getBottom() - 38.f ), juce::Justification::centred );

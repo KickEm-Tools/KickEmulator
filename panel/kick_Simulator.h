@@ -8,13 +8,21 @@
 
 #pragma once
 
-#include <kick_ui/kick_ui.h>
+#include <juce_gui_basics/juce_gui_basics.h>
+#include <PktMgr/PktMgr.hpp>
 #include <contracts/dcl/dcl_contracts.h>
-#include "kick_SimulatorInterfaceImpl.h"
+
+#include <functional>
+#include <map>
 
 namespace sim
 {
     using DCC = contracts::DeviceControlContracts;
+
+    /// Where the panel's packets go (PanelLink::send in the panel program). Until it is set,
+    /// packets are dropped.
+    void setOutput( std::function<void( CPktMgr::HWMsg_t )> Output );
+    void sendToApp( CPktMgr::HWMsg_t Msg );
 
     /// Maps a contracts::DeviceControlContracts::PadColourIds value to a display colour.
     juce::Colour padColourFor( int colourId );
@@ -25,7 +33,8 @@ namespace sim
     /// The SHIFT key. On the unit the control-surface firmware reports a key pressed while SHIFT is
     /// held as its secondary function (the caption printed under the key), e.g. SHIFT + MAIN is
     /// reported as EN_GRID. The simulator does the same.
-    void setShiftHeld( bool Held ); // sends the SHIFT packet and updates the app's shift state
+    /// Over the wire the panel only sends the SHIFT packet; the app keeps its own SHIFT state.
+    void setShiftHeld( bool Held ); // sends the SHIFT packet
     bool isShiftHeld();
     int  shiftedIdFor( int Id ); // secondary function of a key, or Id itself if it has none
 
@@ -129,7 +138,8 @@ namespace sim
             Plus
         };
 
-        SurfaceButton( const juce::String& Caption, int Id, juce::Colour LedColour, bool Toggle = false, Shape S = Shape::Key, Icon I = Icon::None );
+        /// Name: what scripts call the key (defaults to the caption, or "key <id>").
+        SurfaceButton( const juce::String& Caption, int Id, juce::Colour LedColour, bool Toggle = false, Shape S = Shape::Key, Icon I = Icon::None, const juce::String& Name = {} );
 
         int  getId() const noexcept { return id; }
         void setLed( bool On );
@@ -176,10 +186,10 @@ namespace sim
 
     //==============================================================================================
     /// The whole front panel at the proportions of the physical unit, in a fixed canvas of
-    /// canvasW x canvasH units. The real Kick screen (kick_ui::KickHome, 1024x600) is embedded
-    /// scaled into the display cut-out. ScaledPanel below scales the canvas to the window.
-    class Simulator : public juce::Component,
-                      private juce::Timer
+    /// canvasW x canvasH units. The Kick's screen is the app's own window (it runs in its own
+    /// process), so the display cut-out shows only the link's state. ScaledPanel below scales
+    /// the canvas to the window.
+    class Simulator : public juce::Component
     {
     public:
         Simulator();
@@ -188,17 +198,19 @@ namespace sim
         void paint( juce::Graphics& g ) override;
         void resized() override;
 
+        /// A packet from the app (message thread): LEDs, pad colours, the slider's LED ladder.
+        void handleFromApp( const CPktMgr::HWMsg_t& msg );
+        /// Shown in the display cut-out, e.g. "LIVE  /dev/ttys012".
+        void setLinkStatus( const juce::String& Text );
+
         static constexpr int canvasW = 1240, canvasH = 1250;
 
     private:
-
-        void timerCallback() override;
-        void handleFromApp( CPktMgr::HWMsg_t& msg );
         void handlePadMessage( const CPktMgr::HWMsg_t& msg );
         void handleLedMessage( const CPktMgr::HWMsg_t& msg );
         void handleSliderMessage( const CPktMgr::HWMsg_t& msg );
 
-        SurfaceButton& addButton( const juce::String& Caption, int Id, juce::Colour Led, bool Toggle = false, SurfaceButton::Shape S = SurfaceButton::Shape::Key, SurfaceButton::Icon I = SurfaceButton::Icon::None );
+        SurfaceButton& addButton( const juce::String& Caption, int Id, juce::Colour Led, bool Toggle = false, SurfaceButton::Shape S = SurfaceButton::Shape::Key, SurfaceButton::Icon I = SurfaceButton::Icon::None, const juce::String& Name = {} );
         Caption&       addCaption( const juce::String& Text, int Id = -1, juce::Justification J = juce::Justification::centred );
         void           setupPot( juce::Slider& Knob, double Value );
         void           setupEncoder( EndlessKnob& Knob, int KnobId, int Cmd );
@@ -219,7 +231,7 @@ namespace sim
         EndlessKnob  qlinks[4]{ EndlessKnob{ KnobLookAndFeel::Style::Encoder }, EndlessKnob{ KnobLookAndFeel::Style::Encoder }, EndlessKnob{ KnobLookAndFeel::Style::Encoder }, EndlessKnob{ KnobLookAndFeel::Style::Encoder } };
         EndlessKnob  jog{ KnobLookAndFeel::Style::Jog, 4.f };
 
-        int commTicks{ 0 };
+        juce::String linkStatus{ "no link" };
 
         // LED state per id as the app last set it: a key lights when its own LED or the LED of
         // its SHIFT function is on (HALF LEVEL on FULL LEVEL, LATCH on NOTE REPEAT).
@@ -227,8 +239,6 @@ namespace sim
         // The slider's LED ladder as the app last set it (EN_SLIDER_BAR_LED / LEVEL_LED), -1 = none.
         int sliderLed{ -1 };
         bool sliderLedCentred{ false };
-
-        sigslot::scoped_connection fromAppConnection;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( Simulator )
     };
@@ -241,6 +251,7 @@ namespace sim
         ScaledPanel();
         void resized() override;
         void paint( juce::Graphics& g ) override { g.fillAll( juce::Colours::black ); }
+        Simulator& getPanel() { return panel; }
 
     private:
         Simulator panel;

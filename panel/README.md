@@ -1,57 +1,108 @@
 # panel/: the emulated front panel
 
-This is the Kick's front panel drawn to scale: 16 velocity pads, the keys with their LED captions
-and SHIFT functions, P1-P4 and the jog wheel as endless encoders, the slider and its LED ladder,
-and the MASTER / REC pots. It sends what the control-surface microcontroller sends, and it shows
-the pad colours and key LEDs the app sends back.
+`kickem-panel` is the Kick's front panel drawn to scale, as its own program: 16 velocity pads,
+the keys with their LED captions and SHIFT functions, P1-P4 and the jog wheel as endless
+encoders, the slider and its LED ladder, and the MASTER / REC pots. It plays the control-surface
+microcontroller's side of the serial protocol: it sends what the microcontroller sends, and it
+shows the pad colours and key LEDs the app sends back. The Kick's screen is the app's own window,
+in its own process; the panel's display cut-out shows the link's state instead.
 
-## What is here now (phase 4)
+It links JUCE's GUI modules and, from the firmware ref under test, only the protocol:
+`ComProtocol/PktMgr` (`kickem::pktmgr`) and the control ids in
+`Kick/modules/contracts/dcl/dcl_contracts.h` (`kickem::protocol`). No `kick_ui`, no `KickHome`, no
+`SIM_BUILD`. It draws no logo.
 
-The files were imported unchanged from the in-tree simulator (`Kick/apps/kickem/simulator/` on
-`rbdone/goal-simulator-controls` at `6b6024ce`). There is one edit:
+```sh
+kickem-panel [--transport pty|pty:<link>|tcp:<host>:<port>|serial:<dev>[@<baud>]]
+             [--throttle [BAUD]] [--control FILE] [--quiet]
+```
+
+`./kickem run` builds and starts it; to build it alone:
+
+```sh
+MACOSX_DEPLOYMENT_TARGET=12.0 cmake -S . -B build -DKICKEM_PROTOCOL_JUCE=juce \
+      [-DKICKEM_FIRMWARE_DIR=<0700-AAM checkout>] [-DCPM_SOURCE_CACHE=<dir with JUCE>]
+cmake --build build --target kickem-panel     # build/panel/kickem-panel, a plain executable
+```
+
+## Files
 
 | File | What it holds |
 |---|---|
-| `kick_Simulator.{h,cpp}` | Panel geometry (canvas units measured from a photo of the unit), drawing, SHIFT semantics (secondary ids), pad-colour and LED decoding, and the packets each control sends |
-| `kick_SimControl.{h,cpp}` | The scripting channel (`KICK_SIM_CONTROL=<file>`, driven by `checks/sim_ctl.sh`). It has a panel half and a screen half, see below |
-| `kick_SimulatorInterfaceImpl.{h,cpp}` | The in-memory seam: `SimulatorHub` passes `CPktMgr::HWMsg_t` between the panel and the app's `input_events` through `Factory<SimulatorInterface>` (`SIM_BUILD`) |
+| `Main.cpp` | The program: arguments, window, logger (stdout), wiring of panel, link and control channel |
+| `PanelLink.{h,cpp}` | The microcontroller's side of the link: framing with the fetched `CPktMgr`, a reader and a writer thread, the handshake, `SimSerial:` logging |
+| `kick_Simulator.{h,cpp}` | Panel geometry (canvas units measured from a photo of the unit), drawing, SHIFT semantics, pad-colour, LED and slider-ladder decoding, and the packet each control sends |
+| `PanelControl.{h,cpp}` | The scripting channel (`--control FILE`): the panel half of the in-tree simulator's `SimControl` |
+| `../transport/Transport.{h,cpp}` | pty, tcp and serial transports, and the throttle |
 
-The edit: the panel draws no logo. On the work branch it printed the theme asset `Sim Behringer
-Logo.png` above the screen, or the word "behringer" without it; both are trademarks, so that area
-is left blank and there is no option to add one. The change was compiled with
-`-fsyntax-only` against the firmware work branch's `KT_KickEM` flags (`compile_commands.json`).
+## On the wire
 
-**This directory does not build on its own yet**, and the top-level CMake does not build it.
-It compiles only inside the firmware tree, as part of the `KT_KickEM` app on the work branch.
+- **Frames.** Every packet is built with the fetched firmware's `CPktMgr::BuildAndTransmitPacket`
+  and followed by one `'\n'`, because the app's reader takes `size + 7` bytes per frame. Each frame
+  is written with one `write()`: the app's reader drops a frame that arrives in two reads, and the
+  frame after it (firmware `docs/DEVELOPMENT.md` 8.4). A payload over 20 bytes is refused, since
+  the app's receive buffer is 20 bytes with no bounds check.
+- **The app's frames** have no trailing byte. The panel frames them itself (`'M' 'T'`, `size`),
+  then runs each one through `CPktMgr::PushByteToRxFifo`, which checks the CRC. Each call starts
+  at `'M'`, so the decoder's function-static partial-frame buffer is always cleared. An empty
+  payload would never complete there, so those are checked with `CPktMgr::CrcGen` directly.
+- **Handshake,** as `Kick/tests/fake_mcu.py` in the firmware does it. The app sends
+  `EN_SYS_COMM_INIT [CONNECTED]` when it opens the port. The panel then sends "comm init"
+  (`EN_SYS_CHECK_COMM_STATUS [1]`) every second until the app answers `EN_SYS_COMM_INIT [2]`,
+  then "comm live" (`[2]`) every second until the app answers `EN_SYS_CHECK_COMM_STATUS [2]`
+  (`Send Comm Live` in the app's log). Then it reports its version (`EN_SYS_GET_SW_VER [0, 1]`). A
+  second connect frame restarts the handshake.
+- **The pty.** The panel keeps the master side and also holds the slave side open, in raw mode,
+  so the app's first bytes are not echoed and the master sees no hang-up when the app quits or
+  restarts. A restarted app reconnects to the same path.
+- **Throttle** (`--throttle`, default 230400 baud): whole frames are paced at 10 bits a byte in
+  both directions, so a flood of LED or pad packets arrives as late as on the unit. Off by default.
 
-## What still links the firmware app
+Log lines, one per frame and direction (`--quiet` drops the per-frame lines):
 
-These are the dependencies phase 5 removes. Each one is listed with what it becomes.
+```
+SimSerial: listening on /dev/ttys000
+SimSerial: rx SYSTEM cmd=2 data=1 | 4D 54 00 00 02 02 01 05
+SimSerial: handshake: the app connected (EN_SYS_COMM_INIT [CONNECTED])
+SimSerial: tx SYSTEM cmd=4 data=1 | 4D 54 00 00 04 02 01 A0 0A
+SimSerial: rx SYSTEM cmd=2 data=2 | 4D 54 00 00 02 02 02 56
+SimSerial: handshake: comm init answered after 1 try
+SimSerial: tx SYSTEM cmd=4 data=2 | 4D 54 00 00 04 02 02 F3 0A
+SimSerial: rx SYSTEM cmd=4 data=2 | 4D 54 00 00 04 02 02 F3
+SimSerial: LIVE 0.455 s after the app connected (1 try)
+```
 
-| Dependency | Where | Phase 5 |
-|---|---|---|
-| `#include <kick_ui/kick_ui.h>`: the whole app UI | `kick_Simulator.h` | Removed. The panel includes only the protocol headers from the fetched ref (`kickem::protocol`: `PktMgr/PktMgr.hpp`, `contracts/dcl/dcl_contracts.h`) plus JUCE GUI modules |
-| `kick_ui::KickHome::Instance()`, the app's 1024x600 screen embedded as a child component and scaled into the bezel | `Simulator()`, `~Simulator()`, `resized()` | Removed. The app runs in its own process and window. The bezel cut-out stays empty, or later mirrors the app's screen through the test-control `shot` command |
-| `ui::simScreen()` (a `SIM_BUILD` seam in `kick_ControlBase.h`) | `Simulator()`, `~Simulator()` | Removed. The firmware parents overlays to `ui::overlayRoot()` itself (`feature/desktop-seams`) |
-| `contracts::shiftBtnState.store()`, which writes the app's SHIFT global directly | `setShiftHeld()` | Removed. Only the SHIFT packet is sent. **Finding (from reading the code, not yet observed):** the firmware's serial path stores SHIFT in `Controls::shiftBtnState` (`input_events.cpp:248`), not in the `contracts::shiftBtnState` that `DclContractsHelper::isShiftPressed()` reads (`kick_table.cpp`, `kick_padButtonGroup.cpp`). Over the wire those SHIFT behaviours may then be dead, on the unit too. Check this in phase 5 and file it as a FIX if confirmed |
-| `SimulatorHub::sendToApp()` / `fromApp`, `SimulatorInterfaceImpl`, `REGISER_FACTORY( SimulatorInterface, ... )`, `input_events/kick_SimulatorInterface.h`, `common/common.h`, `sigslot` | `kick_SimulatorInterfaceImpl.*`, every `send*` in `kick_Simulator.cpp` | Replaced by a `PanelLink`. It frames each `HWMsg_t` with `CPktMgr::BuildAndTransmitPacket` from the fetched ref and writes it to a `transport/` (pty, TCP, serial). It reads the app's frames back with `CPktMgr::PushByteToRxFifo` and turns them into `handleFromApp()`. The in-memory files are deleted |
-| Screen half of `SimControl`: `click`, `tap`, `clickat`, `list`, `windows`, `status`, the screen part of `shot`, `ui::simFocusTarget()`, `statusProvider` (set by the app's `Main.cpp` from the engine) | `kick_SimControl.cpp` | Moves to the firmware as the generic, opt-in `KICK_TEST_CONTROL` module (`Kick/modules/test_control`, decision 1 in `docs/STANDALONE_SPLIT.md`). Faithful mode uses QEMU input injection instead |
-| Panel half of `SimControl`: `press`, `down`, `up`, `hold`, `turn`, `slider`, `repeat`, `echo`, the panel part of `shot` | `kick_SimControl.cpp` | Stays here as the panel's own control channel. It drives the panel's controls, which send packets over the wire |
-| The app's `Main.cpp`, which runs the app and the panel in one process with one message loop | not imported (work branch `Kick/apps/kickem/Main.cpp`) | The panel gets its own `main`: window, `--transport pty\|tcp:<host:port>\|serial:<dev>`, the control channel, and the machine-wide lock |
+With `KICK_SIM_LOG_SURFACE=1` the panel also logs every packet it acts on as
+`SimSurface: <TYPE> cmd=<n> data=<...>` (the in-tree simulator's trace, which `checks/smoke`
+reads).
 
-Protocol details phase 5 must match. These were read from the firmware's
-`Kick/modules/input_events/input_events.cpp` and `ComProtocol/PktMgr/PktMgr.cpp`, and
-`tools/protocol_roundtrip` shows them:
+## SHIFT
 
-- A frame is `'M' 'T' type dir cmd size data[size-1] crc`. `size` counts the data plus the CRC
-  byte. The CRC is CRC-8, polynomial 0x31, initial value 0xFF, over every byte before it.
-- The app's reader expects **one trailing byte after the CRC** (`packetLength = size + 7`). It
-  keeps that byte off the decoder. Without it, frames are lost. A frame at the end of a read is
-  too short to be taken. A frame that follows another loses its `'M'`, because the reader skips
-  that byte as the previous frame's trailer. The panel must send the trailing byte, presumably
-  the `'\n'` that is commented out in `BuildAndTransmitPacket`.
-- The app's writer sends frames without that trailing byte.
-- `PushByteToRxFifo` keeps its partial frame in a function-`static` vector, shared by every
-  `CPktMgr` in the process. The panel needs one decoder per process, or its own framing on top.
-- A frame with `size == 1` (no data) is never completed by `PushByteToRxFifo`: the CRC byte is
-  taken as data. Every packet the panel sends carries data, so this does not bite yet.
+SHIFT is a toggle on the panel (the unit's is momentary). It sends its press and release packets.
+While it is on, a key reports its secondary function, the caption printed under it, as the unit's
+microcontroller does: SHIFT + MAIN is reported as `EN_GRID`. Clicking a caption (GRID, PREFS, ...)
+sends SHIFT pressed, that function, SHIFT released. The panel no longer writes the app's SHIFT
+state: the app keeps its own, from the SHIFT packet. On a firmware without `fix/shift-state`
+(KickEm-Tools/0700-AAM PR #16) the serial reader stores SHIFT where `isShiftPressed()` does not
+look, so SHIFT + pad and the other SHIFT-held behaviours do not trigger, as on a unit.
+
+## The control channel
+
+`--control FILE`: the panel reads lines `<seq> <command> [args]` appended to FILE and logs
+`PanelControl: ok <seq>` or `PanelControl: error <seq> <reason>`. `checks/lib/kickem_ctl` is the
+client. Commands: `press NAME`, `down NAME [VEL]`, `up NAME`, `hold NAME SECS [VEL]`,
+`turn P1..P4|JOG STEPS`, `slider 0..100`, `repeat MS N NAME`, `shot FILE.png`, `list [FILTER]`,
+`link`, `echo TEXT` (details in `PanelControl.h`). It drives the panel's controls directly, so it
+needs no window server and works while the Mac is locked.
+
+Names: the printed captions (`MAIN`, `PUSH`, `TAP TEMPO`, `GRID`), `Pad 1` to `Pad 16`, the icon
+keys `RECORD`, `OVERDUB`, `STOP`, `PLAY`, `PLAY START`, `BACK`, `COPY`, `MINUS`, `PLUS`, and
+`key <id>` for any key by its `BtnLedSequence` id.
+
+## History
+
+Imported from the in-tree simulator (`Kick/apps/kickem/simulator/` on
+`rbdone/goal-simulator-controls` at `6b6024ce`). Phase 5 of `/goal-standalone` made it its own
+program: the in-memory `SimulatorInterfaceImpl` / `SimulatorHub` and the embedded `KickHome`
+screen were removed, `SimControl` was split (its screen half is now the firmware's
+`KICK_TEST_CONTROL` module), and `PanelLink` and `transport/` replaced the in-memory path.

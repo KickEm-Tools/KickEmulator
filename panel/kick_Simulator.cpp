@@ -16,7 +16,6 @@
  */
 
 #include "kick_Simulator.h"
-#include <contracts/dcl/dcl_contracts_helper.h>
 
 namespace sim
 {
@@ -28,10 +27,9 @@ namespace sim
         const juce::Colour body( 0xff1e1e1e ), bodyEdge( 0xff0c0c0c ), bezel( 0xff0a0a0a ), keyFace( 0xff232323 ), keyFacePressed( 0xff383838 ), keyEdge( 0xff3c3c3c ), print( 0xffb9b9b9 ), printDim( 0xff6f6f6f );
         const juce::Colour ledBlue( 0xff3d9bff ), ledMagenta( 0xffff3fd0 ), ledGreen( 0xff35e07a ), ledRed( 0xffff3b3b ), ledWhite( 0xfff2f2f2 ), ledCyan( 0xff5ff2ff );
 
-        // Display cut-out: the 1024x600 KickHome is scaled by `screenScale` into this rectangle.
-        constexpr int   screenX = 260, screenY = 95, screenW = 730;
-        constexpr float screenScale = screenW / 1024.f;
-        constexpr int   screenH     = (int)( 600 * screenScale + 0.5f ); // 428
+        // Display cut-out: where the unit's 1024x600 screen sits (scale 730 / 1024).
+        constexpr int screenX = 260, screenY = 95, screenW = 730;
+        constexpr int screenH = (int)( 600 * screenW / 1024.f + 0.5f ); // 428
 
         CPktMgr::HWMsg_t makeMsg( CPktMgr::enumPacketType Type, int Cmd, std::vector<int> Data )
         {
@@ -49,9 +47,25 @@ namespace sim
         }
     } // namespace
 
+    namespace
+    {
+        std::function<void( CPktMgr::HWMsg_t )>& output()
+        {
+            static std::function<void( CPktMgr::HWMsg_t )> out;
+            return out;
+        }
+    } // namespace
+
+    void setOutput( std::function<void( CPktMgr::HWMsg_t )> Output ) { output() = std::move( Output ); }
+
+    void sendToApp( CPktMgr::HWMsg_t Msg )
+    {
+        if( output() ) output()( std::move( Msg ) );
+    }
+
     void sendButtonPacket( int Id, int BtnState )
     {
-        SimulatorHub::get().sendToApp( makeMsg( CPktMgr::EN_PKT_TYPE_BUTTON, DCC::EN_BTN_STATUS, { Id, BtnState, velocityDefault, aftertouch } ) );
+        sendToApp( makeMsg( CPktMgr::EN_PKT_TYPE_BUTTON, DCC::EN_BTN_STATUS, { Id, BtnState, velocityDefault, aftertouch } ) );
     }
 
     namespace
@@ -85,7 +99,6 @@ namespace sim
     void setShiftHeld( bool Held )
     {
         shiftHeld.store( Held );
-        contracts::shiftBtnState.store( Held ); // what the keyboard detector does on desktop builds
         sendButtonPacket( DCC::EN_SHIFT, Held ? DCC::BTN_PRESSED : DCC::BTN_RELEASED );
     }
 
@@ -281,7 +294,7 @@ namespace sim
 
     void PadButton::send( int BtnState, int Velocity )
     {
-        SimulatorHub::get().sendToApp( makeMsg( CPktMgr::EN_PKT_TYPE_PAD, DCC::EN_PAD_STATE, { DCC::EN_PAD1 + index, BtnState, Velocity, aftertouch } ) );
+        sendToApp( makeMsg( CPktMgr::EN_PKT_TYPE_PAD, DCC::EN_PAD_STATE, { DCC::EN_PAD1 + index, BtnState, Velocity, aftertouch } ) );
     }
 
     void PadButton::scriptedHold( bool Down, int Velocity )
@@ -312,8 +325,8 @@ namespace sim
     }
 
     //==============================================================================================
-    SurfaceButton::SurfaceButton( const juce::String& Caption, int Id, juce::Colour LedColour, bool Toggle, Shape S, Icon I )
-        : juce::Button( Caption.isNotEmpty() ? Caption.replace( "\n", " " ) : "key " + juce::String( Id ) )
+    SurfaceButton::SurfaceButton( const juce::String& Caption, int Id, juce::Colour LedColour, bool Toggle, Shape S, Icon I, const juce::String& Name )
+        : juce::Button( Name.isNotEmpty() ? Name : Caption.isNotEmpty() ? Caption.replace( "\n", " " ) : "key " + juce::String( Id ) )
         , caption( Caption )
         , id( Id )
         , ledColour( LedColour )
@@ -502,11 +515,6 @@ namespace sim
     {
         setOpaque( true );
 
-        // The real device screen, scaled into the bezel cut-out (see resized()).
-        addAndMakeVisible( kick_ui::KickHome::Instance() );
-        // Full-screen popups, dialogs and notifications go over it, not on the desktop.
-        ui::simScreen() = &kick_ui::KickHome::Instance();
-
         // Pads...
         for( int i = 0; i < 16; ++i )
             addAndMakeVisible( *pads.emplace_back( std::make_unique<PadButton>( i ) ) );
@@ -549,10 +557,10 @@ namespace sim
         addButton( "MENU", DCC::EN_MENU, ledGreen );
         addCaption( "PREFS", DCC::EN_PREF );
         addButton( "SHIFT", DCC::EN_SHIFT, ledGreen, true );
-        addButton( "", DCC::EN_BACK, ledWhite, false, SurfaceButton::Shape::Key, SurfaceButton::Icon::Back );
-        addButton( "", DCC::EN_COPY, ledWhite, false, SurfaceButton::Shape::Key, SurfaceButton::Icon::Copy );
-        addButton( "", DCC::EN_MINUS, ledWhite, false, SurfaceButton::Shape::Key, SurfaceButton::Icon::Minus );
-        addButton( "", DCC::EN_PLUS, ledWhite, false, SurfaceButton::Shape::Key, SurfaceButton::Icon::Plus );
+        addButton( "", DCC::EN_BACK, ledWhite, false, SurfaceButton::Shape::Key, SurfaceButton::Icon::Back, "BACK" );
+        addButton( "", DCC::EN_COPY, ledWhite, false, SurfaceButton::Shape::Key, SurfaceButton::Icon::Copy, "COPY" );
+        addButton( "", DCC::EN_MINUS, ledWhite, false, SurfaceButton::Shape::Key, SurfaceButton::Icon::Minus, "MINUS" );
+        addButton( "", DCC::EN_PLUS, ledWhite, false, SurfaceButton::Shape::Key, SurfaceButton::Icon::Plus, "PLUS" );
         addButton( "PUSH", DCC::EN_KNOB_ENTER, ledWhite ); // the jog wheel push (ENTER); drawn as a small key under the wheel
 
         // Function keys, row 2...
@@ -568,11 +576,11 @@ namespace sim
         addCaption( "MIDI CTRL", DCC::EN_MIDI_CONTROL );
 
         // Transport...
-        addButton( "", DCC::EN_RECORD, ledWhite, false, SurfaceButton::Shape::Round, SurfaceButton::Icon::Record );
-        addButton( "", DCC::EN_OVERDUB, ledGreen, false, SurfaceButton::Shape::Round, SurfaceButton::Icon::Overdub );
-        addButton( "", DCC::EN_STOP, ledCyan, false, SurfaceButton::Shape::Round, SurfaceButton::Icon::Stop );
-        addButton( "", DCC::EN_PLAY, ledGreen, false, SurfaceButton::Shape::Round, SurfaceButton::Icon::Play );
-        addButton( "", DCC::EN_PLAYSTART, ledGreen, false, SurfaceButton::Shape::Round, SurfaceButton::Icon::PlayStart );
+        addButton( "", DCC::EN_RECORD, ledWhite, false, SurfaceButton::Shape::Round, SurfaceButton::Icon::Record, "RECORD" );
+        addButton( "", DCC::EN_OVERDUB, ledGreen, false, SurfaceButton::Shape::Round, SurfaceButton::Icon::Overdub, "OVERDUB" );
+        addButton( "", DCC::EN_STOP, ledCyan, false, SurfaceButton::Shape::Round, SurfaceButton::Icon::Stop, "STOP" );
+        addButton( "", DCC::EN_PLAY, ledGreen, false, SurfaceButton::Shape::Round, SurfaceButton::Icon::Play, "PLAY" );
+        addButton( "", DCC::EN_PLAYSTART, ledGreen, false, SurfaceButton::Shape::Round, SurfaceButton::Icon::PlayStart, "PLAY START" );
 
         // Printed labels...
         addCaption( "MASTER" );
@@ -611,16 +619,11 @@ namespace sim
         slider.setRange( 0, 100, 1 );
         slider.setValue( 100, juce::dontSendNotification );
         slider.onValueChange = [this] {
-            SimulatorHub::get().sendToApp( makeMsg( CPktMgr::EN_PKT_TYPE_SLIDER, DCC::EN_SLIDER_TOUCH_INPUT, { (int)slider.getValue() } ) );
+            sendToApp( makeMsg( CPktMgr::EN_PKT_TYPE_SLIDER, DCC::EN_SLIDER_TOUCH_INPUT, { (int)slider.getValue() } ) );
         };
         addAndMakeVisible( slider );
 
-        // Application -> surface...
-        fromAppConnection = SimulatorHub::get().fromApp.connect( [this]( CPktMgr::HWMsg_t& m ) { handleFromApp( m ); } );
-
-        // Pretend the control surface just came up: the app answers with a COMM_INIT and
-        // thereafter expects a periodic "comm live" ping.
-        startTimer( 1000 );
+        // Application -> surface: PanelLink calls handleFromApp(); the handshake is the link's.
 
         // Last: this triggers resized(), which needs every control above to exist.
         setSize( canvasW, canvasH );
@@ -628,18 +631,13 @@ namespace sim
 
     Simulator::~Simulator()
     {
-        stopTimer();
-        auto& home = kick_ui::KickHome::Instance();
-        ui::simScreen() = nullptr;
-        home.setTransform( {} );
-        removeChildComponent( &home );
         for( auto* s : { &master, &rec } )
             s->setLookAndFeel( nullptr );
     }
 
-    SurfaceButton& Simulator::addButton( const juce::String& Caption, int Id, juce::Colour Led, bool Toggle, SurfaceButton::Shape S, SurfaceButton::Icon I )
+    SurfaceButton& Simulator::addButton( const juce::String& Caption, int Id, juce::Colour Led, bool Toggle, SurfaceButton::Shape S, SurfaceButton::Icon I, const juce::String& Name )
     {
-        auto& b = *buttons.emplace_back( std::make_unique<SurfaceButton>( Caption, Id, Led, Toggle, S, I ) );
+        auto& b = *buttons.emplace_back( std::make_unique<SurfaceButton>( Caption, Id, Led, Toggle, S, I, Name ) );
         buttonsById[Id] = &b;
         addAndMakeVisible( b );
         return b;
@@ -672,33 +670,24 @@ namespace sim
     void Simulator::sendKnob( int KnobId, int Cmd, int Delta )
     {
         const int dir = Delta >= 0 ? DCC::EN_KNOB_CLOCKWISE : DCC::EN_KNOB_ANTICLOCKWISE;
-        SimulatorHub::get().sendToApp( makeMsg( CPktMgr::EN_PKT_TYPE_KNOBS, Cmd, { KnobId, dir, std::abs( Delta ), 0 } ) );
+        sendToApp( makeMsg( CPktMgr::EN_PKT_TYPE_KNOBS, Cmd, { KnobId, dir, std::abs( Delta ), 0 } ) );
     }
 
     void Simulator::sendSystem( int Cmd, std::vector<int> Data )
     {
-        SimulatorHub::get().sendToApp( makeMsg( CPktMgr::EN_PKT_TYPE_SYSTEM, Cmd, std::move( Data ) ) );
+        sendToApp( makeMsg( CPktMgr::EN_PKT_TYPE_SYSTEM, Cmd, std::move( Data ) ) );
     }
 
-    void Simulator::timerCallback()
+    void Simulator::setLinkStatus( const juce::String& Text )
     {
-        if( commTicks == 0 )
-        {
-            sendSystem( DCC::EN_SYS_GET_SW_VER, { 0, 1 } ); // "surface firmware" 0.1
-            sendSystem( DCC::EN_SYS_CHECK_COMM_STATUS, { 1 } ); // comm init
-            startTimer( 5000 );
-        }
-        else
-        {
-            sendSystem( DCC::EN_SYS_CHECK_COMM_STATUS, { 2 } ); // comm live
-        }
-        ++commTicks;
+        linkStatus = Text;
+        repaint( screenX, screenY, screenW, screenH );
     }
 
     //==============================================================================================
-    void Simulator::handleFromApp( CPktMgr::HWMsg_t& msg )
+    void Simulator::handleFromApp( const CPktMgr::HWMsg_t& msg )
     {
-        // Opt-in trace of everything the app sends to the surface, for scripts (sim_smoke.sh):
+        // Opt-in trace of everything the app sends to the surface, for scripts (checks/smoke):
         //   SimSurface: LED cmd=0 data=44,1      (type name, pktCmd, payload)
         static const bool trace = juce::SystemStats::getEnvironmentVariable( "KICK_SIM_LOG_SURFACE", {} ).isNotEmpty();
         if( trace )
@@ -845,6 +834,15 @@ namespace sim
         g.setFont( panelFont( 20.f ) );
         g.drawText( "KICK", bezelRect.withTop( bezelRect.getBottom() - 38.f ), juce::Justification::centred );
 
+        // The screen itself is the app's window, in its own process. The cut-out shows the link.
+        const auto screen = juce::Rectangle<int>( screenX, screenY, screenW, screenH ).toFloat();
+        g.setColour( juce::Colour( 0xff050607 ) );
+        g.fillRect( screen );
+        g.setColour( printDim );
+        g.setFont( panelFont( 15.f, false ) );
+        g.drawFittedText( "The Kick screen is the app's own window.\nControl surface link: " + linkStatus,
+                          screen.reduced( 20.f ).toNearestInt(), juce::Justification::centred, 3 );
+
         // Camera module (top left).
         g.setColour( juce::Colour( 0xff0d0d0d ) );
         g.fillRoundedRectangle( 35.f, 40.f, 130.f, 65.f, 6.f );
@@ -893,12 +891,6 @@ namespace sim
 
     void Simulator::resized()
     {
-        // --- Screen -----------------------------------------------------------------------------
-        auto& home = kick_ui::KickHome::Instance();
-        home.setTransform( juce::AffineTransform::scale( screenScale ).translated( (float)screenX, (float)screenY ) );
-        home.setBounds( 0, 0, 1024, 600 );
-        juce::ignoreUnused( screenH );
-
         size_t cap = 0; // captions, in creation order
 
         // --- Pads: pad 1 bottom-left ------------------------------------------------------------

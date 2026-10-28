@@ -51,7 +51,7 @@ emulator does not compile it. It uses only the id header and PktMgr.
   arguments match the firmware's, so an existing `CPM_SOURCE_CACHE` entry is reused. With the
   firmware's `.3rdPartySourceCache` this finds JUCE 7.0.12 and downloads nothing. CPM warns that
   this cache entry is "dirty", because the firmware applies its multitouch patch to it in place;
-  that does not matter for `juce_core`. The panel, a JUCE GUI app, uses this path in phase 5.
+  that does not matter for `juce_core`. The panel (`kickem-panel`) uses this path and links `juce_gui_basics` too; it is a plain executable, not an app bundle, so `JUCE_MODULES_ONLY` (no juceaide) is enough.
 
 Both were built and run on macOS (Apple clang, CMake 4.4.4, `MACOSX_DEPLOYMENT_TARGET=12.0`):
 

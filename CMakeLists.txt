@@ -19,4 +19,5 @@ include(KickemFirmware)
 
 add_subdirectory(tools/protocol_roundtrip)
 
-# panel/ is not built yet: it still links the firmware app (see panel/README.md, phase 5).
+# The panel (kickem-panel): a JUCE GUI program, so it needs -DKICKEM_PROTOCOL_JUCE=juce.
+add_subdirectory(panel)

@@ -190,6 +190,10 @@ namespace sim
 
         static constexpr int canvasW = 1240, canvasH = 1250;
 
+        /// The logo printed above the screen, from the panel's --logo <png> option. The emulator
+        /// ships no manufacturer artwork: with no file set, nothing is drawn there.
+        static inline juce::File logoFile;
+
     private:
         void loadLogo();
 
@@ -217,7 +221,7 @@ namespace sim
         std::map<int, SurfaceButton*>               buttonsById;
 
         juce::Slider master, rec, slider;
-        juce::Image  logo; // "behringer" mark printed above the screen
+        juce::Image  logo; // the user-supplied logo (logoFile), printed above the screen
         EndlessKnob  qlinks[4]{ EndlessKnob{ KnobLookAndFeel::Style::Encoder }, EndlessKnob{ KnobLookAndFeel::Style::Encoder }, EndlessKnob{ KnobLookAndFeel::Style::Encoder }, EndlessKnob{ KnobLookAndFeel::Style::Encoder } };
         EndlessKnob  jog{ KnobLookAndFeel::Style::Jog, 4.f };
 

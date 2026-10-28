@@ -642,7 +642,8 @@ namespace sim
     {
         // The artwork is dark on white; turn darkness into alpha so it prints in panel grey on the
         // black bezel, then crop to the mark.
-        auto src = juce::ImageCache::getFromFile( ui::Theme::getAsset( "Sim Behringer Logo.png" ) );
+        if( !logoFile.existsAsFile() ) return;
+        auto src = juce::ImageCache::getFromFile( logoFile );
         if( !src.isValid() ) return;
 
         juce::Image out( juce::Image::ARGB, src.getWidth(), src.getHeight(), true );

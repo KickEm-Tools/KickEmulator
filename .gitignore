@@ -1,0 +1,28 @@
+# Build trees, firmware checkouts and caches: never committed.
+/build*/
+/out/
+/.cache/
+/.kickem/
+_deps/
+CMakeUserPresets.json
+compile_commands.json
+
+# VM disk images, kernels, downloads (faithful mode).
+*.qcow2
+*.img
+*.iso
+*.raw
+*.tar.gz
+*.tar.xz
+/modes/vm/images/
+/modes/vm/downloads/
+
+# Check output (logs, probe WAVs, screenshots) goes to an OUTDIR outside the tree or here.
+/checks/out/
+
+# Editors and OS noise.
+.DS_Store
+.vscode/
+.idea/
+__pycache__/
+*.pyc

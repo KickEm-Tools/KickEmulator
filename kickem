@@ -680,7 +680,10 @@ def vm_artifact(a, path, commit, url):
 def cmd_run_vm(a):
     vm = vm_module()
     t_start = time.monotonic()
-    path, commit, url = fetch(a.firmware, a.ref, force=a.force)
+    if getattr(a, "no_fetch", False):
+        path, commit, url = use_checkout(a.firmware, a.ref)
+    else:
+        path, commit, url = fetch(a.firmware, a.ref, force=a.force)
     preflight(path, a.ignore_missing)
     tarball = vm_artifact(a, path, commit, url)
     root = build_root(url, a.ref)

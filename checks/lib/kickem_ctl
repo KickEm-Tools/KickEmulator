@@ -17,11 +17,13 @@ Panel (acked as "PanelControl: ok <n>" in the panel log):
     panelshot OUT.png        render the panel
     link                     the link's state and frame counters
 Screen (acked as "TestControl: ok <n>" in the app log; needs feature/desktop-seams):
-    tap X Y                  touch pixel (X,Y) of the 1024x600 screen (vm mode: QMP input event) (delivered to the touched
+    tap X Y                  touch pixel (X,Y) of the 1024x600 screen (delivered to the touched
                              component directly; works with the screen locked)
     touch X Y                the same as a real touch through the window: JUCE dispatches it
                              to the component, its mouse listeners and its parents' (list rows);
                              needs the Kick window topmost there (fails when locked or covered)
+    (vm mode: tap and touch are both a real touch on the VM's screen, a QMP input event on its
+    usb-tablet that goes through Weston and Xwayland; works headless)
     click NAME...            on-screen components by title ("WiFi", "Resources")
     clickat NAME FX FY       touch a titled component at a fraction of its size
     list [FILTER]            titled components on the screen
@@ -128,9 +130,9 @@ def vm_screen(st, panel, cmd, args):
     firmware. (The other screen commands still go to KICK_TEST_CONTROL, shared into the guest.)"""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "modes", "vm"))
     import kickem_vm
-    if cmd == "tap" and len(args) == 2:
+    if cmd in ("tap", "touch") and len(args) == 2:
         kickem_vm.tap(st, float(args[0]), float(args[1]))
-        print("tap %s %s (QMP input-send-event)" % tuple(args))
+        print("%s %s %s (QMP input-send-event)" % (cmd, args[0], args[1]))
         return 0
     if cmd == "shot" and len(args) == 1:
         target = os.path.abspath(args[0])
@@ -180,7 +182,7 @@ def main(argv):
         out(panel.send("shot " + q(os.path.abspath(args[0]))), "shot")
     elif cmd == "link":
         out(panel.send("link"), "link")
-    elif cmd in ("tap", "shot") and st.get("mode") == "vm":
+    elif cmd in ("tap", "touch", "shot") and st.get("mode") == "vm":
         return vm_screen(st, panel, cmd, args)
     elif cmd == "tap" and len(args) == 2:
         screen.send("tap %s %s" % tuple(args))

@@ -17,8 +17,14 @@
 //                       one KNOBS packet per detent
 //   slider VALUE        the slider, 0..100
 //   repeat MS N NAME    press NAME N times, MS ms apart (absolute schedule); each press logged
-//   shot FILE.png       render the panel to FILE.png, in-process
+//   shot FILE.png [SCALE]  render the panel to FILE.png, in-process (SCALE: 2 = 2480x2500)
+//   screen              log the embedded screen's state ("PanelControl: screen connected
+//                       size=1024x600 updates=.. fps5s=.. latency_ms=.."; --screen embedded)
+//   screentouch X Y [X2 Y2 [MS]]  click the embedded screen at pixel (X, Y), or drag from there
+//                       to (X2, Y2) over MS ms (default 300), through the mouse's own path
+//   screenshot FILE.png the embedded screen's last frame as received, at its own size
 //   list [FILTER]       log the panel's named controls ("PanelControl: item ...")
+//   resize W H          resize the panel's window (the panel and an embedded screen scale with it)
 //   link                log the link's state and frame counters ("PanelControl: link ...")
 //   raw HEX...          fault injection: write these bytes as they are, in one write
 //   split MS HEX1 HEX2  fault injection: write HEX1, wait MS ms, write HEX2 (two reads)

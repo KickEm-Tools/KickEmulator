@@ -5,8 +5,8 @@
 # Starter Kit with PUSH, play four bars, stop, and check that the engine made sound and the panel
 # got its LED and pad-colour feedback over the serial link.
 #
-#   checks/smoke [--mode fast|vm] [--firmware URL|PATH] [--ref REF] [--no-build] [--artifact TARBALL]
-#                [--accel hvf|kvm|tcg] [OUTDIR]
+#   checks/smoke [--mode fast|vm] [--screen embedded|window] [--firmware URL|PATH] [--ref REF]
+#                [--no-build] [--artifact TARBALL] [--accel hvf|kvm|tcg] [OUTDIR]
 #
 # Default firmware: KickEm-Tools/0700-AAM main; default OUTDIR: checks/out/smoke. Exit status 0
 # when every check passes, 1 otherwise.
@@ -35,7 +35,7 @@ while [ $# -gt 0 ]; do
         --firmware) RUN_ARGS="$RUN_ARGS --firmware $2"; shift 2 ;;
         --ref) RUN_ARGS="$RUN_ARGS --ref $2"; shift 2 ;;
         --no-build) NO_BUILD=--no-build; shift ;;
-        --artifact|--accel) RUN_ARGS="$RUN_ARGS $1 $2"; shift 2 ;;
+        --artifact|--accel|--screen) RUN_ARGS="$RUN_ARGS $1 $2"; shift 2 ;;
         -h|--help) sed -n '4,20p' "$0"; exit 0 ;;
         -*) echo "smoke: unknown option $1" >&2; exit 2 ;;
         *) break ;;
@@ -107,6 +107,19 @@ else
     fail "handshake"
 fi
 
+SCREEN_MODE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("screen") or "window")' "$RUN/state.json")
+if [ "$SCREEN_MODE" = embedded ]; then
+    i=0
+    until grep -q "^ScreenView: first frame" "$PLOG" || [ "$i" -ge 40 ]; do i=$((i + 1)); sleep 0.25; done
+    if grep -q "^ScreenView: first frame" "$PLOG"; then
+        pass "Kick screen embedded in the panel ($(grep -m1 '^ScreenView: connected' "$PLOG" | sed 's/^ScreenView: //'); $(grep -m1 '^ScreenView: first frame' "$PLOG" | sed 's/^ScreenView: //'))"
+    else
+        fail "embedded screen: no frame in the panel (see $PLOG)"
+    fi
+else
+    say "   screen: $SCREEN_MODE (the app's own window / the VM's display)"
+fi
+
 if [ "$MODE" = vm ]; then
     PROJECT="$ROOT/content/StarterKit/demos/Starter Kit/Starter Kit.kickPrj"   # deployed to /app/demos
     python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print("   VM: accel %s, guest UART on %s; boot (QEMU start to SSH) %.1f s, deploy %.1f s, ktkick.service to LIVE %.1f s (kt_kick.sh sleeps 15 s first)" % (s["accel"], s["serial_device"], s["boot_s"], s["deploy_s"], s["live_s"]))' "$RUN/state.json"
@@ -161,6 +174,7 @@ while awk -v n="$(now)" -v e="$END" 'BEGIN { exit !(n < e) }'; do
     sleep 0.1
 done
 "$CTL" shot "$OUT/playing.png" >/dev/null || fail "shot playing.png"
+[ "$SCREEN_MODE" = embedded ] && say "   embedded screen while playing: $("$CTL" screen 2>&1)"
 "$CTL" echo SMOKE_STOP >/dev/null
 "$CTL" press STOP >/dev/null || fail "STOP not delivered"
 sleep 3

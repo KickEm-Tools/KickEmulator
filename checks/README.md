@@ -7,9 +7,11 @@ lock), prints `PASS` / `FAIL` lines, stops what it started, and leaves its evide
 (default `checks/out/<check>`, not committed). Each prints which mode ran and what that mode cannot
 tell you.
 
-Each check takes the same arguments: `[--mode fast] [--firmware URL|PATH] [--ref REF] [--no-build]
-[--no-fetch] [OUTDIR]`. All of them are fast mode only so far (`--mode vm` exits 3, except `smoke`,
-which runs in the VM too). Run times are after the build, on an Apple Silicon Mac.
+Each check takes the same arguments: `[--mode fast] [--screen embedded|window] [--firmware URL|PATH]
+[--ref REF] [--no-build] [--no-fetch] [OUTDIR]`. Most are fast mode only so far (`--mode vm` exits
+3, except `smoke` and `embedded_screen`, which run in the VM too). `--screen` (default embedded)
+only changes where the screen is shown: the checks talk to the panel and the test-control module,
+never to a window, so they pass either way. Run times are after the build, on an Apple Silicon Mac.
 
 | Check | What it proves | Run time | Needs in the fork (beyond `main` of 2026-10-29) |
 |---|---|---|---|
@@ -19,6 +21,7 @@ which runs in the VM too). Run times are after the build, on an Apple Silicon Ma
 | `pads` | Banks, FULL / HALF LEVEL, 16 LEVELS, NOTE REPEAT and LATCH timing, NOTES pitches, ERASE + pad, BACK, COPY / ERASE in GRID, focus with slider / + / - / jog, P1-P4 per screen, MENU | 2 min | `feature/pad-modifiers` (#14, with #13), `fix/engine-gain-staging` (#4) |
 | `sampler_looper` | SAMPLER records the input exactly (96000 frames of the -12 dBFS tone), preview and Pad 1 play it, SAMPLE EDIT's Discard trims it to 72000 frames, it reloads; the LOOPER loops every 384000 samples, periods sample-identical, OVERDUB adds | 1 min 50 s | nothing |
 | `overlays` | Spinner, dialogs, nested dialogs and bubbles are overlays on the app's own window, within 1024x600, no other desktop window; a panel key reaches the app under a modal dialog; a touch on a list row selects it (read from the app's rendering) | 25-40 s | `feature/test-control-touch` (#18) for the list rows (`touch` needs the screen unlocked; it reports SKIP otherwise) |
+| `embedded_screen` | `--screen embedded`: the panel receives the 1024x600 screen and shows what the app renders (Projects screen, under 2 % of samples differ); a click on the embedded screen at Location row 2 (BROWSE) selects it, in the app's rendering and in the panel's frame; a click on PROGRAMS opens a dialog, which is an overlay on the app's window and shows inside the embedded screen; a click on its Cancel closes it; at least 5 updates/s while playing. Prints the touch-to-frame latency, the frame rate and whether the Mac was locked. Clicks go through the panel's mouse path (`screentouch`), not the test-control module. `--mode vm` too | 40 s (fast), about 90 s (vm, hvf) | fast: `feature/screen-mirror` (#23); vm: nothing |
 | `serial_faults` | `/goal-serial` phase 5. Bad CRC, a frame split across two reads, two frames in one read, garbage between and before frames, an empty payload, closing and reopening the port. For each: good frames around it taken, no crash, a real key afterwards gets its LED back; after the reopen the app reconnects (handshake LIVE again) | 30 s | `fix/serial-robustness` (#17) |
 
 The checks were ported from the in-tree simulator's `sim_*.sh` (`Kick/tools/` on
@@ -57,11 +60,15 @@ one read, so `serial_faults` stages a split frame with two writes, where a UART 
     touched component (works with the screen locked); `touch` is a real touch through the window,
     which a list's mouse listener hears too.
   - Fault injection (`raw HEX`, `split MS HEX1 HEX2`, `close`, `reopen`) goes to the panel's link.
+  - Embedded-screen commands (`screen`, `screentouch X Y [X2 Y2 [MS]]`, `screenshot OUT.png`) go to
+    the panel: its state, frame rate and touch-to-frame latency; a click or drag on the embedded
+    screen through the panel's own mouse path; the last frame as the panel received it.
   - `echo TEXT` writes a marker into both logs, so a check can cut either log at the same moment.
 - **`common.sh`**: what every check shares: arguments, `start_emulator` / `stop_emulator`
   (`kickem run --detach --fresh --probe`), the probe clock, log markers.
 - **`wav_measure.py`**: peak, RMS, onsets and dominant frequency of the probe WAV (needs numpy).
 - **`row_highlight.py`**: which list row the app draws highlighted in a `shot` (standard library).
+- **`png_diff.py`**: how different two renderings of the screen are (standard library).
 
 ## Log names (the firmware's, since `feature/desktop-seams`)
 

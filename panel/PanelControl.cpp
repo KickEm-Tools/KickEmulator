@@ -212,10 +212,56 @@ namespace sim
             return;
         }
 
+        if( cmd == "screen" || cmd == "screentouch" || cmd == "screenshot" )
+        {
+            auto* sim    = dynamic_cast<Simulator*>( &panel );
+            auto* screen = sim != nullptr ? sim->getEmbeddedScreen() : nullptr;
+            if( screen == nullptr )
+                return fail( "the screen is not embedded (kickem-panel --screen embedded)" );
+            if( cmd == "screen" )
+            {
+                log( "screen " + screen->stats() );
+                return ok();
+            }
+            if( !screen->isConnected() )
+                return fail( "the embedded screen is not connected (" + screen->stats() + ")" );
+            if( cmd == "screenshot" )
+            {
+                // The frame as received from the screen server, at its own size.
+                const auto out = juce::File::getCurrentWorkingDirectory().getChildFile( tok.joinIntoString( " " ) );
+                const auto img = screen->frameCopy();
+                out.deleteFile();
+                juce::FileOutputStream os( out );
+                if( !img.isValid() || !os.openedOk() || !juce::PNGImageFormat().writeImageToStream( img, os ) )
+                    return fail( "cannot write " + out.getFullPathName() );
+                log( "screenshot " + out.getFullPathName() + " " + juce::String( img.getWidth() ) + "x" + juce::String( img.getHeight() ) );
+                return ok();
+            }
+            // screentouch X Y [X2 Y2 [MS]]: a click (or a drag to X2 Y2 over MS ms) on the embedded
+            // screen at screen pixels, through the same path as the mouse.
+            if( !( tok.size() == 2 || tok.size() == 4 || tok.size() == 5 ) )
+                return fail( "usage: screentouch X Y [X2 Y2 [MS]]" );
+            const juce::Point<int> from( tok[0].getIntValue(), tok[1].getIntValue() );
+            const juce::Point<int> to = tok.size() >= 4 ? juce::Point<int>( tok[2].getIntValue(), tok[3].getIntValue() ) : from;
+            const int              ms = tok.size() == 5 ? tok[4].getIntValue() : 300;
+            busy = true;
+            screen->scriptedTouch( from, to, ms, juce::jmax( 1, ms / 20 ), [this, ok] {
+                juce::Timer::callAfterDelay( 50, [this, ok] { busy = false; ok(); } );
+            } );
+            return;
+        }
+
         if( cmd == "shot" )
         {
+            // shot FILE.png [SCALE]: SCALE 2 renders the 1240x1250 canvas at 2480x2500.
+            float scale = 1.0f;
+            if( tok.size() > 1 && tok[tok.size() - 1].containsOnly( "0123456789." ) )
+            {
+                scale = juce::jlimit( 0.25f, 4.0f, tok[tok.size() - 1].getFloatValue() );
+                tok.remove( tok.size() - 1 );
+            }
             const auto out = juce::File::getCurrentWorkingDirectory().getChildFile( tok.joinIntoString( " " ) );
-            const auto img = panel.createComponentSnapshot( panel.getLocalBounds(), true, 1.0f );
+            const auto img = panel.createComponentSnapshot( panel.getLocalBounds(), true, scale );
             out.deleteFile();
             juce::FileOutputStream os( out );
             if( !os.openedOk() || !juce::PNGImageFormat().writeImageToStream( img, os ) )
@@ -233,6 +279,18 @@ namespace sim
                     log( "item " + juce::String( typeid( C ).name() ) + "\t" + n + "\t" + C.getBounds().toString() );
                 return false;
             } );
+            return ok();
+        }
+
+        if( cmd == "resize" )
+        {
+            // resize W H: the panel's window (its content scales: ScaledPanel).
+            auto* top = panel.getTopLevelComponent();
+            if( tok.size() != 2 || top == nullptr )
+                return fail( "usage: resize W H" );
+            top->setSize( juce::jlimit( 200, 4000, tok[0].getIntValue() ), juce::jlimit( 200, 4000, tok[1].getIntValue() ) );
+            const auto t = panel.getTransform();
+            log( "resize window " + juce::String( top->getWidth() ) + "x" + juce::String( top->getHeight() ) + ", panel scale " + juce::String( t.mat00, 3 ) );
             return ok();
         }
 

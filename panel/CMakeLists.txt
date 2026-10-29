@@ -17,6 +17,7 @@ add_executable(kickem-panel
     Main.cpp
     PanelLink.cpp
     PanelControl.cpp
+    ScreenView.cpp
     kick_Simulator.cpp)
 kickem_link_protocol(kickem-panel)
 target_link_libraries(kickem-panel PRIVATE

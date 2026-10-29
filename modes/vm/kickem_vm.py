@@ -389,8 +389,10 @@ def alive(pid):
 
 
 # --- Boot ----------------------------------------------------------------------------------------
-def boot(d, accel=None, display=False, serial="pty", sound=False, disks=(), ssh_timeout=None):
-    """Boots a fresh overlay of the provisioned image; returns the state (pids, ports, pty)."""
+def boot(d, accel=None, display=False, serial="pty", sound=False, disks=(), ssh_timeout=None, vnc=None):
+    """Boots a fresh overlay of the provisioned image; returns the state (pids, ports, pty).
+    vnc: a unix socket path for QEMU's VNC server on the VM's display (the panel's embedded
+    screen, kickem run --screen embedded); its pointer is absolute on the usb-tablet."""
     accel = accel or default_accel()
     image = vm_path(PROVISIONED)
     if not os.path.exists(image):
@@ -418,6 +420,10 @@ def boot(d, accel=None, display=False, serial="pty", sound=False, disks=(), ssh_
         "-device", "virtio-serial-pci", "-chardev", "file,id=con,path=" + boot_log, "-device", "virtconsole,chardev=con",
         "-qmp", "tcp:127.0.0.1:%d,server=on,wait=off" % qmp_port,
         "-display", ("cocoa" if IS_MAC else "gtk") if display else "none"]
+    if vnc:
+        # The display for the panel (--screen embedded): RFB on a unix socket, never on a network.
+        # QEMU sends the viewer's pointer to the usb-tablet as absolute coordinates.
+        cmd += ["-vnc", "unix:" + vnc]
     # The guest's PL011 UART (/dev/ttyAMA0): the panel's end of the wire.
     if serial == "tcp":
         serial_port = free_port()
@@ -440,7 +446,7 @@ def boot(d, accel=None, display=False, serial="pty", sound=False, disks=(), ssh_
     t0 = time.monotonic()
     p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=qlog, stderr=subprocess.STDOUT, start_new_session=True)
     st = {"mode": "vm", "accel": accel, "qemu_pid": p.pid, "ssh_port": ssh_port, "qmp_port": qmp_port,
-          "ssh_key": ssh_key(), "disk": disk, "boot_log": boot_log, "serial": serial, "serial_port": serial_port,
+          "ssh_key": ssh_key(), "disk": disk, "boot_log": boot_log, "serial": serial, "serial_port": serial_port, "vnc": vnc,
           "run_dir": d, "booted": time.time()}
     update_state(d, **st)
     # The pty's name, from QMP.

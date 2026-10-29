@@ -5,13 +5,15 @@
 #
 #   NAME=transport; . "$(dirname "$0")/lib/common.sh"; parse_args "$@"
 #
-# Common arguments: [--mode fast] [--firmware URL|PATH] [--ref REF] [--no-build] [--no-fetch] [OUTDIR]
+# Common arguments: [--mode fast] [--screen embedded|window] [--firmware URL|PATH] [--ref REF]
+#                   [--no-build] [--no-fetch] [OUTDIR]
 # Sets: CHECKS ROOT OUT RUN CTL KLOG PLOG PROBE MODE RUN_ARGS; after start_emulator also KPID.
 
 CHECKS=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$CHECKS/.." && pwd)
 CTL="$CHECKS/lib/kickem_ctl"
 MODE=fast
+SCREEN=embedded
 RUN_ARGS=""
 
 parse_args() {
@@ -19,6 +21,8 @@ parse_args() {
         case "$1" in
             --mode) MODE=$2; shift 2 ;;
             --firmware|--ref) RUN_ARGS="$RUN_ARGS $1 $2"; shift 2 ;;
+            --screen) SCREEN=$2; RUN_ARGS="$RUN_ARGS $1 $2"; shift 2 ;;
+            --artifact|--accel) RUN_ARGS="$RUN_ARGS $1 $2"; shift 2 ;;   # faithful mode (checks that take --mode vm)
             --no-build|--no-fetch) RUN_ARGS="$RUN_ARGS $1"; shift ;;
             -h|--help) sed -n '2,/^set -u/p' "$0" | sed '$d'; exit 0 ;;
             -*) echo "$NAME: unknown option $1" >&2; exit 2 ;;
@@ -35,15 +39,27 @@ parse_args() {
     export KICKEM_RUN_DIR="$RUN"
     case "$MODE" in
         fast) ;;
-        vm) echo "SKIP  $NAME: --mode vm is not supported by this check yet"; exit 3 ;;
+        vm) [ "${VM_OK:-}" = 1 ] || { echo "SKIP  $NAME: --mode vm is not supported by this check yet"; exit 3; } ;;
         *) echo "$NAME: --mode fast|vm" >&2; exit 2 ;;
     esac
 }
 
 banner() {
     echo "== $NAME, mode $MODE"
-    echo "   cannot tell you: anything Linux-specific (systemd units, scripts, device nodes, the Wi-Fi /"
-    echo "   Ethernet / CV / update screens); timing and CPU load are this computer's, not the unit's."
+    if [ "$MODE" = vm ]; then
+        echo "   cannot tell you: latency, CPU headroom on the A53 cores, the codec, the GPU driver, or the"
+        echo "   control-surface microcontroller's own behaviour."
+    else
+        echo "   cannot tell you: anything Linux-specific (systemd units, scripts, device nodes, the Wi-Fi /"
+        echo "   Ethernet / CV / update screens); timing and CPU load are this computer's, not the unit's."
+    fi
+}
+
+# "locked" or "unlocked": the Mac's screen (IOConsoleLocked), for the record; elsewhere "n/a".
+screen_lock_state() {
+    case "$(ioreg -n Root -d1 2>/dev/null | sed -n 's/.*"IOConsoleLocked" = \([A-Za-z]*\).*/\1/p' | head -1)" in
+        Yes) echo locked ;; No) echo unlocked ;; *) echo n/a ;;
+    esac
 }
 
 # start_emulator [kickem run options...]: a fresh run (demos, templates, prefs restored; FRESH=""
@@ -56,7 +72,7 @@ start_emulator() {
     rm -f "$PROBE"
     PROBE_OFFSET=""
     # shellcheck disable=SC2086
-    KICK_SIM_LOG_SURFACE=1 "$ROOT/kickem" run $RUN_ARGS $FRESH --detach --probe "$PROBE" --out "$RUN" "$@" \
+    KICK_SIM_LOG_SURFACE=1 "$ROOT/kickem" run --mode "$MODE" $RUN_ARGS $FRESH --detach --probe "$PROBE" --out "$RUN" "$@" \
         > "$OUT/kickem.log" 2>&1
     STATUS=$?
     if [ "$STATUS" -ne 0 ]; then
@@ -65,7 +81,7 @@ start_emulator() {
         exit 1
     fi
     KPID=$(state kick_pid)
-    echo "   firmware $(state firmware) $(state ref) $(state commit)"
+    echo "   firmware $(state firmware) $(state ref) $(state commit), screen $(state screen)"
     grep -q "Send Comm Live" "$KLOG" && grep -q "^SimSerial: LIVE" "$PLOG" || { echo "FAIL  no handshake"; exit 1; }
 }
 

@@ -9,7 +9,8 @@ image without a unit.
 > modes, pads, sampler_looper, overlays, serial_faults) pass over the wire against
 > `integration/standalone`.
 > Faithful mode (the fork's Linux arm64 build in a QEMU VM) runs and its smoke test passes too.
-> The other checks and CI come next; see [Status](#status). The plan is
+> CI: a reusable workflow forks call with a few lines ([Add it to your fork's CI](#add-it-to-your-forks-ci)),
+> and downloadable panel builds ([Panel downloads](#panel-downloads)); see [Status](#status). The plan is
 > `/goal-standalone` on the firmware work branch `rbdone/goal-simulator-controls`
 > (`.claude/commands/goal-standalone.md`).
 
@@ -231,6 +232,110 @@ tree without them (upstream, `27194180`, which `KickEm-Tools/0700-AAM` `main` eq
 merges) it says the first two are missing; with `--ignore-missing` the configure fails, because CPM tries to clone `AudIO` from the
 placeholder server `https://example.com/your-git-server`.
 
+## Add it to your fork's CI
+
+`.github/workflows/test-firmware.yml` is a reusable workflow. It builds your firmware with the
+emulator, boots it headless, runs checks, uploads the evidence (app log, panel log with every
+frame, probe WAV, screenshots, each check's output, the build log) and writes a job summary that
+says what the mode cannot tell you. Add `.github/workflows/emulator.yml` to your fork:
+
+```yaml
+name: emulator
+on:
+  pull_request:
+  push:
+    branches: [main]   # pull requests restore the caches their base branch saved
+jobs:
+  fast:                # the desktop Kick app over a pty, on macos-15: every pull request
+    uses: KickEm-Tools/KickEmulator/.github/workflows/test-firmware.yml@v1
+  vm:                  # faithful mode, the Linux arm64 KT_Kick in QEMU (slow: see below)
+    if: github.event_name == 'push'
+    uses: KickEm-Tools/KickEmulator/.github/workflows/test-firmware.yml@v1
+    with:
+      mode: vm
+```
+
+That is all a fork needs: the firmware defaults to the calling repository at the commit under
+test (a pull request's merge commit), checked out with the caller's token, so a private fork
+works. Other inputs (`checks`, `runner`, `firmware-repository`, `firmware-ref`, `ccache`): see
+[`.github/workflows/README.md`](.github/workflows/README.md). To pin a commit instead of `v1`,
+use `@<sha>` and pass the same SHA as `emulator-ref`. `KickEm-Tools/0700-AAM` runs it this way
+(`.github/workflows/emulator.yml` there).
+
+**Run times**, measured on GitHub-hosted runners on 2026-10-29 against `KickEm-Tools/0700-AAM`
+`main`:
+
+| Job | Runner | Cold (no caches) | Warm (CPM and ccache restored) |
+|---|---|---|---|
+| fast, `smoke` | `macos-15` (3 vCPUs of an M1, 7 GB) | **10 min 53 s** end to end (fork PR run [40944165399](https://github.com/KickEm-Tools/0700-AAM/actions/runs/40944165399)): queue 4 s, set-up 19 s, build `Kick` + panel 9 min 43 s, `smoke` 32 s | **7 min 29 s** (self-test run [40947396346](https://github.com/KickEm-Tools/KickEmulator/actions/runs/40947396346)): build 6 min 06 s with 66 of 70 compiles from ccache; the rest is configuring, `juceaide` and linking |
+| fast, `smoke` | `macos-15`, after `main` moved on (62% ccache hits) | | 6 min 10 s (run [40960336893](https://github.com/KickEm-Tools/KickEmulator/actions/runs/40960336893)) |
+| fast, `smoke` | `macos-14` | build 12 min 43 s (run [40938808038](https://github.com/KickEm-Tools/KickEmulator/actions/runs/40938808038)) | |
+| vm, `smoke` | `ubuntu-24.04-arm` (4 Neoverse-N2 cores, 16 GB, no KVM) | about **59 min** (run [40947396346](https://github.com/KickEm-Tools/KickEmulator/actions/runs/40947396346)): `KT_Kick-linux-arm64` built in Debian 12 in Docker 8 min 28 s, guest image provisioned under TCG 44 min 24 s (once; then cached), `smoke` 5 min 04 s: boot to SSH 50 s, deploy 40 s, `ktkick.service` to LIVE 43 s, `kickem run` to LIVE 3 min 22 s | **14 min 51 s** (run [40960336893](https://github.com/KickEm-Tools/KickEmulator/actions/runs/40960336893), image from the cache): artifact 8 min 42 s, `smoke` 5 min 09 s |
+
+The other checks add their own run time (`checks/README.md`): all seven in fast mode take about
+another 10 minutes after the build.
+
+**Runner limits.**
+
+- **macOS runners** are 3-vCPU M1 virtual machines; the build is most of the job. They have an
+  audio output device ("Apple Virtual Sound Device", 48 kHz), so the engine runs and the probe
+  records; the workflow installs the BlackHole loopback driver only if a runner has none. A free
+  organisation plan runs at most 5 macOS jobs at a time across the organisation; beyond that jobs
+  queue (measured: 4-16 s to start when idle, 95-110 s for `macos-15` / `macos-26` and 7 min for
+  `macos-14` while other macOS jobs ran). `macos-14` jobs were also refused for a while on
+  2026-10-28/29 ("not acquired by Runner of type hosted"), which is why `macos-15` is the default.
+  `macos-latest` is `macos-26` (2026-10).
+- **Hosted arm64 Linux runners have no KVM** (`/dev/kvm` is missing on `ubuntu-24.04-arm`), so
+  faithful mode runs QEMU under TCG: the guest is emulated, many times slower than the unit, and
+  its timings mean nothing. **It cannot check the audio there**: the engine renders at about 0.12
+  of real time (0.03 with `--screen embedded`, whose VNC encoding the workflow therefore avoids in
+  vm mode), so `smoke --mode vm` prints its audio results instead of asserting them and says
+  "audio not verified". What it does check there: the guest boots the unit's `ktkick.service`, the
+  panel's handshake over the guest's UART, PUSH loading the Starter Kit from `/app/demos`, the
+  LED and pad-colour packets, the screen (QMP screendumps) and that `KT_Kick` is still the same
+  process. With hvf (Apple Silicon) or KVM (an arm64 Linux host with `/dev/kvm`, such as a
+  self-hosted runner: pass `runner:`) the audio is asserted as in fast mode. Provisioning the guest image (cloud-init installs about 200 packages)
+  takes about half an hour under TCG, against 2 minutes with hvf on a Mac; the workflow caches the
+  provisioned image, keyed on `modes/vm/guest/`. The x86_64 runners (`ubuntu-24.04`) do have
+  `/dev/kvm`, but for x86 guests only; an arm64 guest is TCG there too, and the artifact build
+  would be emulated as well, so faithful mode uses the arm64 runner.
+- **Caches** belong to the calling repository (10 GB per repository), and a pull request can
+  restore only caches saved on its base branch or by earlier runs of the same pull request: run
+  the workflow on pushes to `main` so pull requests start warm. JUCE (CPM) is about 170 MB,
+  ccache about 100 MB, the provisioned VM image about 520 MB.
+- **Fast mode on Linux runners** (`ubuntu-24.04`, `ubuntu-24.04-arm`) builds, and audio works
+  through a PulseAudio null sink, but `smoke` does not pass yet. On Linux the firmware reads its
+  data from the unit's absolute paths (`/app/assets`, `/app/demos`, `/app/templates`,
+  `/data/sounds`, `/home/Kick`: `Kick/modules/common/source/kick_paths.cpp`), not from the
+  build directory as on macOS. With none of them present the Projects screen has no entries and
+  the app crashes in `ui::RecentProject::visibilityChanged()` (`recentItems[0]` of an empty list,
+  SIGSEGV about 5 s after start, during the handshake; seen under gdb on `ubuntu-24.04`, the same on
+  `ubuntu-24.04-arm`). Fast mode on a Linux desktop needs a runtime extension point for the data
+  root in the firmware (inert on the unit when unset), which is not there yet; faithful mode runs
+  the Linux build at the unit's paths instead.
+
+## Panel downloads
+
+Tagged releases (`panel-v*`) carry `kickem-panel` for macOS arm64, Linux x86_64 and Linux arm64
+(`.github/workflows/panel.yml`; no Windows build yet, because the transports are POSIX). Use a
+release to drive a VM's or a unit's serial port without building anything; `kickem` itself always
+builds the panel from the firmware ref it runs, so a fork that changes the protocol is followed.
+Each archive has `BUILD-INFO.txt` with the firmware commit its protocol headers came from.
+
+- **macOS** (12 or later, Apple Silicon): the binary is ad-hoc signed, not notarised, so
+  Gatekeeper blocks it the first time. After unpacking, either run
+  `xattr -d com.apple.quarantine kickem-panel`, or open it once from Finder with right-click >
+  **Open** (or **Open Anyway** in System Settings > Privacy & Security).
+- **Linux** (glibc 2.35 or later: Ubuntu 22.04, Debian 12): needs X11 and FreeType
+  (`libx11-6 libxext6 libxrandr2 libxinerama1 libxcursor1 libfreetype6`); under Wayland it runs
+  through Xwayland.
+
+```sh
+./kickem-panel --transport pty                       # prints the pty path to give the app (KICK_SERIAL_DEVICE)
+./kickem-panel --transport tcp:127.0.0.1:4555        # a QEMU guest's UART on -serial tcp:...,server
+./kickem-panel --transport serial:/dev/ttyUSB0       # a unit's UART through a USB adapter
+```
+
 ## Status
 
 | Phase (`/goal-standalone`) | What | State |
@@ -239,7 +344,7 @@ placeholder server `https://example.com/your-git-server`.
 | 5a | The panel as its own program on the wire (pty, tcp, serial, throttle); `kickem run --mode fast`; the panel control channel and `kickem_ctl`; `checks/smoke` | done: smoke passes against `integration/standalone` |
 | 5b | `checks/transport`, `modes`, `pads`, `sampler_looper`, `overlays` (ports of the in-tree `sim_*.sh`) and `serial_faults` (/goal-serial phase 5); panel fault injection (`raw`, `split`, `close`, `reopen`) | done: all pass against `integration/standalone` (2026-10-29); the fault test found the reader bugs fixed in KickEm-Tools/0700-AAM #17; drift against `main` in `checks/README.md` |
 | 6 | Faithful mode: QEMU arm64 VM with the fork's `KT_Kick-linux-arm64`, panel on the VM's serial port | done: `kickem run --mode vm`, `checks/smoke --mode vm` passes (hvf and TCG) against `integration/standalone` |
-| 7 | Reusable CI workflow for forks (`test-firmware.yml`), panel release builds | in progress |
+| 7 | Reusable CI workflow for forks (`test-firmware.yml`), the emulator's own CI (`self-test.yml`), panel release builds (`panel.yml`) | done: fast smoke and faithful smoke pass in CI against `KickEm-Tools/0700-AAM` `main`; panel builds for macOS arm64, Linux x86_64 and arm64. Not yet tagged: `v1` and `panel-v0.1.0` wait for the go-ahead |
 | - | The embedded screen (`--screen embedded`): the firmware's `KICK_SCREEN_MIRROR` in fast mode, QEMU's VNC server in faithful mode; `checks/embedded_screen` | done, see [The screen](#the-screen-embedded-or-in-its-own-window) |
 
 ## Layout
@@ -255,7 +360,7 @@ placeholder server `https://example.com/your-git-server`.
 | `checks/` | `smoke`, `transport`, `modes`, `pads`, `sampler_looper`, `overlays`, `serial_faults`, `embedded_screen`; `lib/` (`kickem_ctl`, `common.sh`, `wav_measure.py`, `row_highlight.py`, `png_diff.py`). See `checks/README.md` |
 | `content/StarterKit/` | The Starter Kit: synthesised samples and a demo project, CC0 |
 | `kickem` | The launcher |
-| `.github/workflows/` | Empty until phase 7 |
+| `.github/workflows/`, `.github/ci/` | `test-firmware.yml` (the reusable workflow for forks), `self-test.yml` (this repository's CI), `panel.yml` (panel builds and releases); the scripts they run. See `.github/workflows/README.md` |
 
 ## Building the tools by hand
 

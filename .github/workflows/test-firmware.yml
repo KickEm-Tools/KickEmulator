@@ -1,0 +1,357 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The reusable workflow forks call: it builds a 0700-AAM firmware ref with KickEmulator, boots it
+# headless against the emulated front panel, runs the checks, uploads the evidence and writes a
+# job summary that says what the mode cannot tell you. See README.md, "Add it to your fork's CI".
+#
+#   jobs:
+#     emulator:
+#       uses: KickEm-Tools/KickEmulator/.github/workflows/test-firmware.yml@v1
+#       with:
+#         mode: fast            # fast (desktop Kick over a pty) or vm (Linux arm64 KT_Kick in QEMU)
+#
+# Every input is optional. The firmware defaults to the calling repository at the commit that
+# triggered the run (for a pull request, its merge commit).
+name: test-firmware
+
+on:
+  workflow_call:
+    inputs:
+      firmware-repository:
+        description: "owner/name of the firmware repository (default: the calling repository)"
+        type: string
+        default: ""
+      firmware-ref:
+        description: "branch, tag or SHA to test (default: the calling run's github.sha)"
+        type: string
+        default: ""
+      mode:
+        description: "fast (the desktop Kick app over a pty) or vm (the Linux arm64 KT_Kick in a QEMU VM)"
+        type: string
+        default: fast
+      runner:
+        description: "runs-on label (default: macos-15 for fast, ubuntu-24.04-arm for vm; fast also runs on macos-14, macos-26, ubuntu-24.04 / ubuntu-24.04-arm)"
+        type: string
+        default: ""
+      checks:
+        description: "checks to run, space or comma separated (smoke transport modes pads sampler_looper overlays serial_faults; vm: smoke)"
+        type: string
+        default: smoke
+      emulator-ref:
+        description: "KickEmulator branch, tag or SHA to check out; keep it equal to the @ref in uses:"
+        type: string
+        default: v1
+      emulator-repository:
+        description: "owner/name of the emulator repository"
+        type: string
+        default: KickEm-Tools/KickEmulator
+      screen:
+        description: "embedded (the screen inside the panel) or window; default: kickem's (embedded) in fast mode, window in vm mode (QEMU's VNC encoding costs a TCG guest a lot)"
+        type: string
+        default: ""
+      ccache:
+        description: "fast mode: cache compiler output between runs (ccache)"
+        type: boolean
+        default: true
+      artifact-name:
+        description: "name of the evidence artifact (default: kickem-evidence-<mode>-<runner>)"
+        type: string
+        default: ""
+    outputs:
+      result:
+        description: "pass or fail"
+        value: ${{ jobs.test.outputs.result }}
+
+jobs:
+  test:
+    name: ${{ inputs.mode }} ${{ inputs.checks }} (${{ inputs.runner != '' && inputs.runner || (inputs.mode == 'vm' && 'ubuntu-24.04-arm' || 'macos-15') }})
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (inputs.mode == 'vm' && 'ubuntu-24.04-arm' || 'macos-15') }}
+    timeout-minutes: ${{ inputs.mode == 'vm' && 150 || 50 }}
+    permissions:
+      contents: read
+    outputs:
+      result: ${{ steps.checks.outputs.result }}
+    env:
+      MODE: ${{ inputs.mode }}
+      CHECKS: ${{ inputs.checks }}
+      FW_REPO: ${{ inputs.firmware-repository != '' && inputs.firmware-repository || github.repository }}
+      FW_REF: ${{ inputs.firmware-ref != '' && inputs.firmware-ref || github.sha }}
+      RUNNER_LABEL: ${{ inputs.runner != '' && inputs.runner || (inputs.mode == 'vm' && 'ubuntu-24.04-arm' || 'macos-15') }}
+      EMU_REPO: ${{ inputs.emulator-repository }}
+      EMU_REF: ${{ inputs.emulator-ref }}
+      KICKEM_CACHE: ${{ github.workspace }}/.kickem-cache
+      CPM_SOURCE_CACHE: ${{ github.workspace }}/.kickem-cache/cpm
+      EVIDENCE: ${{ github.workspace }}/evidence
+      KICKEM_LOCK: ${{ github.workspace }}/.kickem-cache/kt_kickem.lock
+      KICKEM_LOCK_WAIT: "60"
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - name: Inputs
+        id: inputs
+        shell: bash
+        run: |
+          case "$MODE" in fast|vm) ;; *) echo "::error::mode must be fast or vm, not '$MODE'"; exit 2 ;; esac
+          mkdir -p "$EVIDENCE" "$KICKEM_CACHE"
+          echo "t_start=$(date +%s)" >> "$GITHUB_OUTPUT"
+          name='${{ inputs.artifact-name }}'
+          [ -n "$name" ] || name="kickem-evidence-$MODE-$RUNNER_LABEL"
+          echo "artifact=$name" >> "$GITHUB_OUTPUT"
+          echo "firmware $FW_REPO @ $FW_REF, emulator $EMU_REPO @ $EMU_REF, mode $MODE, checks '$CHECKS', runner $RUNNER_LABEL"
+
+      - name: Check out the emulator (${{ inputs.emulator-repository }} @ ${{ inputs.emulator-ref }})
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ inputs.emulator-repository }}
+          ref: ${{ inputs.emulator-ref }}
+          path: emulator
+          persist-credentials: false
+
+      - name: Check out the firmware
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.FW_REPO }}
+          ref: ${{ env.FW_REF }}
+          path: firmware
+          fetch-depth: 1
+          persist-credentials: false
+
+      # kickem keys its checkout and build directories by URL and ref. A fixed local branch name
+      # keeps those paths the same from run to run, so ccache hits; state.json keeps the commit.
+      - name: Firmware commit
+        id: firmware
+        shell: bash
+        run: |
+          git -C firmware branch -f kickem-ci HEAD
+          commit=$(git -C firmware rev-parse HEAD)
+          juce=$(sed -n 's/^set(JUCE_GIT_TAG *\([^ )]*\).*/\1/p' firmware/Kick/3rdParty.cmake)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "subject=$(git -C firmware log -1 --format=%s | tr -d '\r' | cut -c1-120)" >> "$GITHUB_OUTPUT"
+          echo "juce=${juce:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "emulator=$(git -C emulator rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "firmware $FW_REPO $commit ($(git -C firmware log -1 --format=%s)); JUCE ${juce:-?}"
+
+      # JUCE (about 170 MB) and CPM itself. The firmware's CMake patches JUCE inside the cache,
+      # so the key covers the patches too.
+      - name: CPM cache (JUCE)
+        id: cpm
+        uses: actions/cache/restore@v5
+        with:
+          path: .kickem-cache/cpm
+          key: kickem-cpm-${{ runner.os }}-${{ runner.arch }}-juce${{ steps.firmware.outputs.juce }}-${{ hashFiles('firmware/Kick/patches/**', 'firmware/Kick/get_cpm.cmake', 'emulator/cmake/KickemCPM.cmake') }}
+
+      - name: ccache
+        id: ccache
+        if: inputs.mode == 'fast' && inputs.ccache
+        uses: actions/cache/restore@v5
+        with:
+          path: .kickem-cache/ccache
+          key: kickem-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: kickem-ccache-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [ '${{ inputs.mode }}' = vm ]; then brew install qemu; fi
+          if [ '${{ inputs.ccache }}' = true ] && [ "$MODE" = fast ]; then brew install ccache; fi
+          # The engine needs an output device, or it runs silent and the probe has nothing to
+          # measure. Hosted macOS runners have "Apple Virtual Sound Device" (2026-10); if a runner
+          # has none, install the BlackHole loopback driver (GPL-3.0, used here, not shipped).
+          if [ "$MODE" = fast ]; then
+            if system_profiler SPAudioDataType | grep -q "Default Output Device: Yes"; then
+              echo "audio output: $(system_profiler SPAudioDataType | grep -B3 'Default Output Device: Yes' | head -1 | sed 's/^ *//; s/:$//')"
+            else
+              echo "no default audio output device: installing BlackHole 2ch"
+              brew install --cask blackhole-2ch
+              sudo killall coreaudiod || true
+              sleep 3
+            fi
+            system_profiler SPAudioDataType > "$EVIDENCE/audio-devices.txt" 2>&1 || true
+          fi
+
+      - name: Install (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # The app's build packages (Kick/how-to/Kick_Compilation.txt, the fork's build.yml; WebKit
+          # is not linked) for fast mode, the panel's, an X server, and QEMU for faithful mode.
+          pkgs="gcc g++ make cmake ninja-build pkg-config file libasound2-dev libjack-jackd2-dev
+                libcurl4-openssl-dev libfreetype6-dev libx11-dev libxcomposite-dev libxcursor-dev
+                libxext-dev libxinerama-dev libxi-dev libxrandr-dev libxrender-dev libglu1-mesa-dev
+                mesa-common-dev libserial-dev xvfb xauth"
+          [ "$MODE" = fast ] && pkgs="$pkgs pulseaudio pulseaudio-utils libasound2-plugins alsa-utils"
+          [ '${{ inputs.ccache }}' = true ] && [ "$MODE" = fast ] && pkgs="$pkgs ccache"
+          [ "$MODE" = vm ] && pkgs="$pkgs qemu-system-arm qemu-efi-aarch64 qemu-utils ipxe-qemu cloud-image-utils openssh-client"
+          sudo apt-get update -q
+          # shellcheck disable=SC2086
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $pkgs
+          # A virtual display for the panel (and, in fast mode, the app).
+          Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp > "$EVIDENCE/xvfb.log" 2>&1 &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          if [ "$MODE" = fast ]; then
+            # Hosted runners have no sound card and no snd-dummy module: PulseAudio's null sink,
+            # reached through ALSA's pulse plugin, is a real-time clocked output for the engine.
+            pulseaudio --start --exit-idle-time=-1 --log-target=file:"$EVIDENCE/pulseaudio.log"
+            pactl load-module module-null-sink sink_name=kickem rate=48000 > /dev/null
+            pactl set-default-sink kickem
+            pactl info | sed -n 's/^\(Server Name\|Default Sink\|Default Sample Specification\): /audio \1: /p'
+          fi
+          ls -l /dev/kvm 2>/dev/null || echo "no /dev/kvm: QEMU runs under TCG (emulation)"
+
+      - name: Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Python packages
+        shell: bash
+        run: python -m pip install --quiet numpy
+
+      - name: ccache settings
+        if: inputs.mode == 'fast' && inputs.ccache
+        shell: bash
+        run: |
+          {
+            echo "CCACHE_DIR=$KICKEM_CACHE/ccache"
+            echo "CCACHE_MAXSIZE=1500M"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$KICKEM_CACHE/ccache"
+          CCACHE_DIR=$KICKEM_CACHE/ccache ccache -z > /dev/null
+          CCACHE_DIR=$KICKEM_CACHE/ccache ccache -s | head -5 || true
+
+      - name: Build Kick and the panel (fast)
+        id: build_fast
+        if: inputs.mode == 'fast'
+        shell: bash
+        run: |
+          t0=$(date +%s)
+          set -o pipefail
+          emulator/kickem build --firmware "$GITHUB_WORKSPACE/firmware" --ref kickem-ci 2>&1 | tee "$EVIDENCE/build-output.txt"
+          echo "build_s=$(( $(date +%s) - t0 ))" >> "$GITHUB_OUTPUT"
+          log=$(find "$KICKEM_CACHE/build" -name build.log | head -1); [ -n "$log" ] && cp "$log" "$EVIDENCE/build.log"
+          [ -n "${CCACHE_DIR:-}" ] && ccache -s | tee "$EVIDENCE/ccache.txt" | head -12 || true
+
+      - name: Save ccache
+        if: always() && inputs.mode == 'fast' && inputs.ccache && steps.build_fast.outcome != 'skipped'
+        uses: actions/cache/save@v5
+        with:
+          path: .kickem-cache/ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
+
+      - name: Build the KT_Kick-linux-arm64 artifact and the panel (vm)
+        id: build_vm
+        if: inputs.mode == 'vm'
+        shell: bash
+        run: |
+          t0=$(date +%s)
+          set -o pipefail
+          emulator/modes/vm/artifact.sh --build firmware "$RUNNER_TEMP/vm-artifact" 2>&1 | tee "$EVIDENCE/artifact-output.txt"
+          cp "$RUNNER_TEMP/vm-artifact/KT_Kick-linux-arm64/manifest.json" "$EVIDENCE/artifact-manifest.json"
+          echo "artifact_s=$(( $(date +%s) - t0 ))" >> "$GITHUB_OUTPUT"
+          echo "artifact=$RUNNER_TEMP/vm-artifact/KT_Kick-linux-arm64.tar.gz" >> "$GITHUB_OUTPUT"
+
+      # Saved as soon as the build is done, so a failing check does not lose them.
+      - name: Save the CPM cache
+        if: always() && inputs.mode == 'fast' && steps.cpm.outputs.cache-hit != 'true' && steps.build_fast.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: .kickem-cache/cpm
+          key: ${{ steps.cpm.outputs.cache-primary-key }}
+
+      # The provisioned guest image (stock Debian 12 arm64 plus cloud-init's packages) and the SSH
+      # key baked into it. Provisioning under TCG takes many minutes, so it is cached.
+      - name: VM image cache
+        if: inputs.mode == 'vm'
+        id: vmcache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            .kickem-cache/vm/kick-debian12-provisioned.qcow2
+            .kickem-cache/vm/id_ed25519
+            .kickem-cache/vm/id_ed25519.pub
+          key: kickem-vm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('emulator/modes/vm/guest/user-data', 'emulator/modes/vm/guest/meta-data') }}
+
+      - name: Provision the VM image (vm)
+        id: provision
+        if: inputs.mode == 'vm'
+        shell: bash
+        run: |
+          t0=$(date +%s)
+          # Under TCG (no KVM on hosted runners) cloud-init installing about 200 packages takes about
+          # half an hour, against 2 minutes with hvf: allow 70 minutes. The result is cached.
+          python emulator/modes/vm/kickem_vm.py provision --timeout 4200 2>&1 | tee "$EVIDENCE/provision-output.txt"
+          echo "provision_s=$(( $(date +%s) - t0 ))" >> "$GITHUB_OUTPUT"
+          echo "cached=${{ steps.vmcache.outputs.cache-hit == 'true' }}" >> "$GITHUB_OUTPUT"
+          cp "$KICKEM_CACHE/vm/provision-serial.log" "$EVIDENCE/" 2>/dev/null || true
+          cat "$KICKEM_CACHE/vm/provision-times.json" 2>/dev/null || true
+
+      - name: Save the VM image
+        if: inputs.mode == 'vm' && steps.vmcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            .kickem-cache/vm/kick-debian12-provisioned.qcow2
+            .kickem-cache/vm/id_ed25519
+            .kickem-cache/vm/id_ed25519.pub
+          key: ${{ steps.vmcache.outputs.cache-primary-key }}
+
+      - name: Provisioning logs
+        if: failure() && steps.provision.outcome == 'failure'
+        shell: bash
+        run: |
+          mkdir -p "$EVIDENCE/provision"
+          cp "$KICKEM_CACHE"/vm/provision/*.log "$EVIDENCE/provision/" 2>/dev/null || true
+          tail -40 "$EVIDENCE"/provision/qemu.log 2>/dev/null || true
+
+      - name: Run the checks
+        id: checks
+        shell: bash
+        run: |
+          screen='${{ inputs.screen }}'
+          if [ "$MODE" = vm ]; then
+            set -- --mode vm --screen "${screen:-window}" --firmware "$GITHUB_WORKSPACE/firmware" --ref kickem-ci --artifact '${{ steps.build_vm.outputs.artifact }}'
+          else
+            set -- --mode fast ${screen:+--screen "$screen"} --firmware "$GITHUB_WORKSPACE/firmware" --ref kickem-ci --no-build
+          fi
+          emulator/.github/ci/run-checks.sh "$EVIDENCE" "$CHECKS" "$@"
+
+      # vm mode: JUCE lands in the host's CPM cache only when the panel is built, inside the check.
+      - name: Save the CPM cache (vm)
+        if: always() && inputs.mode == 'vm' && steps.cpm.outputs.cache-hit != 'true' && hashFiles('.kickem-cache/cpm/juce/**/CMakeLists.txt') != ''
+        uses: actions/cache/save@v5
+        with:
+          path: .kickem-cache/cpm
+          key: ${{ steps.cpm.outputs.cache-primary-key }}
+
+      - name: Job summary
+        if: always()
+        shell: bash
+        env:
+          FW_COMMIT: ${{ steps.firmware.outputs.commit }}
+          FW_SUBJECT: ${{ steps.firmware.outputs.subject }}
+          EMU_COMMIT: ${{ steps.firmware.outputs.emulator }}
+          T_START: ${{ steps.inputs.outputs.t_start }}
+          BUILD_S: ${{ steps.build_fast.outputs.build_s }}
+          ARTIFACT_S: ${{ steps.build_vm.outputs.artifact_s }}
+          PROVISION_S: ${{ steps.provision.outputs.provision_s }}
+          PROVISION_CACHED: ${{ steps.provision.outputs.cached }}
+          ARTIFACT_NAME: ${{ steps.inputs.outputs.artifact }}
+        run: python emulator/.github/ci/summary.py "$EVIDENCE" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.inputs.outputs.artifact }}
+          path: |
+            evidence/
+            !evidence/**/run/stage/
+            !evidence/**/*.qcow2
+            !evidence/**/*.ctl
+            !evidence/**/*.ctl.seq
+          if-no-files-found: warn
+          retention-days: 14

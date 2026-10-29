@@ -535,16 +535,37 @@ def wait_for(path, pattern, timeout, pids=()):
         for p in pids:
             reap(p)
             if not alive(p):
+                say("process %d exited while waiting for %r in %s%s" % (p, pattern, path, exit_text(p)))
                 return None
         time.sleep(0.1)
+    say("timed out after %.0f s waiting for %r in %s" % (timeout, pattern, path))
     return None
+
+
+EXITED = {}  # pid -> wait status, for the children reaped here
 
 
 def reap(pid):
     try:
-        os.waitpid(pid, os.WNOHANG)
+        p, status = os.waitpid(pid, os.WNOHANG)
+        if p == pid:
+            EXITED[pid] = status
     except (ChildProcessError, OSError):
         pass
+
+
+def exit_text(pid):
+    status = EXITED.get(pid)
+    if status is None:
+        return ""
+    if os.WIFSIGNALED(status):
+        sig = os.WTERMSIG(status)
+        try:
+            name = signal.Signals(sig).name
+        except ValueError:
+            name = str(sig)
+        return ": killed by %s" % name
+    return ": exit status %d" % os.WEXITSTATUS(status)
 
 
 def stop_pid(pid, name, timeout=10.0):

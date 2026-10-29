@@ -205,35 +205,27 @@ LOUD=$(printf '%s\n' "$PLAYING" | awk '$1 > -40' | grep -c .)
 MAX=$(printf '%s\n' "$PLAYING" | sort -g | tail -1)
 # How fast the engine rendered: seconds of audio the probe logged per second of wall time between
 # PLAY and STOP. A unit, a Mac and hvf render in real time (about 1.0). An emulated guest (TCG,
-# as on hosted CI runners, which have no KVM) falls far behind (0.03-0.15 measured on
-# ubuntu-24.04-arm): the four bars yield one or two rendered seconds, and since the sequencer runs
-# on wall-clock time, notes bunch up in the late audio, so its peaks say nothing about the
-# firmware's gain staging. Then (vm mode only) sound in every rendered second is asserted, and the
-# peak is printed, not asserted. Playing longer does not help: on 2026-10-29 KT_Kick crashed in
-# such a guest (SIGSEGV) after 90 s of playback at a real-time factor of 0.03.
+# as on hosted CI runners, which have no KVM) falls far behind: 0.12 measured on ubuntu-24.04-arm
+# (0.03 with the embedded screen's VNC encoding). The four bars then yield about one rendered
+# second, the sequencer (on wall-clock time) and the audio no longer line up, and the probe WAV
+# held anything from silence to +5.8 dBFS peaks in three such runs. Playing longer does not help:
+# KT_Kick crashed in such a guest (SIGSEGV) after 90 s of playback at 0.03. So in vm mode, below
+# a real-time factor of 0.8, the audio results are printed, not asserted, and the run says that
+# it did not verify the audio.
 RENDERED=$(between TestControl SMOKE_PLAY SMOKE_STOP "$KLOG" | grep -c "^AudioProbe:")
 RTF=$(awk -v n="$RENDERED" -v a="$T_PLAY" -v b="$T_STOP" 'BEGIN { printf "%.2f", (b > a) ? n / (b - a) : 0 }')
 SLOW=""
 if [ "$MODE" = vm ] && awk -v r="$RTF" 'BEGIN { exit !(r < 0.8) }'; then SLOW=1; fi
+LAST=$(between TestControl SMOKE_STOP SMOKE_END "$KLOG" | grep "^AudioProbe:" | tail -1 | peaks)
 if [ -n "$SLOW" ]; then
-    say "NOTE  the guest rendered $RENDERED s of audio in $(awk -v a="$T_PLAY" -v b="$T_STOP" 'BEGIN { printf "%.1f", b - a }') s of playback (real-time factor $RTF):"
-    say "      too slow for the per-second level and clipping checks; this is the emulation (QEMU $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("accel", "?"))' "$RUN/state.json" 2>/dev/null)),"
-    say "      not the firmware. The peak is printed, not asserted."
-    if [ "$N" -ge 1 ] && [ "$LOUD" -eq "$N" ]; then pass "sound during playback: $LOUD/$N rendered seconds above -40 dBFS (slow guest)"; else fail "sound during playback: only $LOUD/$N rendered seconds above -40 dBFS"; fi
-    say "INFO  max peak ${MAX:-?} dBFS during playback (not asserted: slow guest)"
+    say "NOTE  audio not verified: the guest rendered $RENDERED s of audio in $(awk -v a="$T_PLAY" -v b="$T_STOP" 'BEGIN { printf "%.1f", b - a }') s of playback (real-time factor"
+    say "      $RTF, QEMU $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("accel", "?"))' "$RUN/state.json" 2>/dev/null)). That is the emulation, not the firmware; run faithful mode with hvf or KVM to check the audio."
+    say "INFO  sound during playback: $LOUD/$N rendered seconds above -40 dBFS, max peak ${MAX:-?} dBFS; after STOP: ${LAST:-?} dBFS (not asserted)"
 else
     if [ "$N" -ge 3 ] && [ "$LOUD" -eq "$N" ]; then pass "sound during playback: $LOUD/$N seconds above -40 dBFS"; else fail "sound during playback: only $LOUD/$N seconds above -40 dBFS"; fi
     if [ -n "$MAX" ] && awk -v p="$MAX" 'BEGIN { exit !(p <= 0) }'; then pass "no clipping (max peak $MAX dBFS)"; else fail "master clipped (max peak ${MAX:-?} dBFS)"; fi
+    if [ -n "$LAST" ] && awk -v p="$LAST" 'BEGIN { exit !(p < -60) }'; then pass "silent after STOP (peak $LAST dBFS)"; else fail "not silent after STOP (peak ${LAST:-?} dBFS)"; fi
 fi
-if [ -n "$SLOW" ]; then
-    # A slow guest renders the seconds after STOP late too: wait (up to 60 s) for three of them and judge the third.
-    i=0
-    while [ "$(after TestControl SMOKE_STOP "$KLOG" | grep -c '^AudioProbe:')" -lt 3 ] && [ "$i" -lt 120 ]; do i=$((i + 1)); sleep 0.5; done
-    LAST=$(after TestControl SMOKE_STOP "$KLOG" | grep "^AudioProbe:" | sed -n 3p | peaks)
-else
-    LAST=$(between TestControl SMOKE_STOP SMOKE_END "$KLOG" | grep "^AudioProbe:" | tail -1 | peaks)
-fi
-if [ -n "$LAST" ] && awk -v p="$LAST" 'BEGIN { exit !(p < -60) }'; then pass "silent after STOP (peak $LAST dBFS)"; else fail "not silent after STOP (peak ${LAST:-?} dBFS)"; fi
 
 #### 5. Timing ######################################################################################
 # Sound is detected when the probe logs its first loud second, so it began up to 1 s earlier.
@@ -263,6 +255,6 @@ else
     say "evidence: $OUT (kick.log, panel.log, probe.wav, loaded*.png, playing*.png, kickem.log)"
     say "mode fast: says nothing about the device's Linux build; see README 'What each mode cannot tell you'"
 fi
-if [ "$FAILS" -eq 0 ]; then say "SMOKE OK"; exit 0; fi
+if [ "$FAILS" -eq 0 ]; then say "SMOKE OK${SLOW:+ (audio not verified: the guest rendered at $RTF of real time)}"; exit 0; fi
 say "SMOKE FAILED: $FAILS check(s)"
 exit 1

@@ -152,6 +152,16 @@ audio engine has to keep up in real time for the probe check; under slow TCG it 
 check would then fail for speed, not for a bug. Hosted arm64 runners (`ubuntu-24.04-arm`) have no
 KVM, so they run TCG too, but without cross-architecture translation.
 
+**Measured in CI** (`.github/workflows/test-firmware.yml`, `ubuntu-24.04-arm`: 4 Neoverse-N2
+cores, 16 GB, TCG, 2026-10-29): provisioning 44 min 24 s (once, then cached: 523 MB compressed),
+`KT_Kick-linux-arm64` artifact in Docker 8 min 28-42 s, boot to SSH 50-53 s, deploy 40 s,
+`ktkick.service` to LIVE 41-43 s (handshake after 18-19 tries), `Project: loaded` to the pad
+colours 44-49 s, the whole `smoke` about 5 min. The engine renders about 0.12 s of audio per
+second there (0.03 with `--screen embedded`), so the audio cannot be judged: `smoke` reports it
+and says "audio not verified". In one run with 90 s of playback at 0.03, `KT_Kick` died with
+SIGSEGV (`ktkick.service: Main process exited, code=killed, status=11/SEGV`), not seen at real
+time.
+
 ## Device Linux paths: what ran for real
 
 Observed in the VM on 2026-10-29 with `KICK_HARDWARE` unset (logs: `kick.log`, `guest/journal.txt`;

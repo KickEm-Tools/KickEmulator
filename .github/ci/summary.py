@@ -155,6 +155,12 @@ def main():
 
     out.append("### What this run cannot tell you")
     out.append("")
+    for name, status, rc, secs in rows:
+        path = os.path.join(ev, name, "output.txt")
+        if os.path.exists(path) and any(l.startswith("NOTE  audio not verified") for l in open(path, errors="replace")):
+            out.append("- **`%s` did not verify the audio**: the guest rendered far slower than real time (see its NOTE line), "
+                       "so the level, clipping and silence results are printed, not asserted. Boot, the unit's service, the "
+                       "serial handshake, the project load, LEDs, pad colours and the screen were checked." % name)
     out.append("- " + CANNOT_TELL.get(mode, ""))
     for l in ci_limits(mode):
         out.append("- " + l)

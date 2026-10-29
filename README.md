@@ -268,8 +268,9 @@ use `@<sha>` and pass the same SHA as `emulator-ref`. `KickEm-Tools/0700-AAM` ru
 | Job | Runner | Cold (no caches) | Warm (CPM and ccache restored) |
 |---|---|---|---|
 | fast, `smoke` | `macos-15` (3 vCPUs of an M1, 7 GB) | **10 min 53 s** end to end (fork PR run [40944165399](https://github.com/KickEm-Tools/0700-AAM/actions/runs/40944165399)): queue 4 s, set-up 19 s, build `Kick` + panel 9 min 43 s, `smoke` 32 s | **7 min 29 s** (self-test run [40947396346](https://github.com/KickEm-Tools/KickEmulator/actions/runs/40947396346)): build 6 min 06 s with 66 of 70 compiles from ccache; the rest is configuring, `juceaide` and linking |
+| fast, `smoke` | `macos-15`, after `main` moved on (62% ccache hits) | | 6 min 10 s (run [40960336893](https://github.com/KickEm-Tools/KickEmulator/actions/runs/40960336893)) |
 | fast, `smoke` | `macos-14` | build 12 min 43 s (run [40938808038](https://github.com/KickEm-Tools/KickEmulator/actions/runs/40938808038)) | |
-| vm, `smoke` | `ubuntu-24.04-arm` (4 Neoverse-N2 cores, 16 GB, no KVM) | about **59 min** (run [40947396346](https://github.com/KickEm-Tools/KickEmulator/actions/runs/40947396346)): `KT_Kick-linux-arm64` built in Debian 12 in Docker 8 min 28 s, guest image provisioned under TCG 44 min 24 s (once; then cached), `smoke` 5 min 04 s: boot to SSH 50 s, deploy 40 s, `ktkick.service` to LIVE 43 s, `kickem run` to LIVE 3 min 22 s | (measuring) |
+| vm, `smoke` | `ubuntu-24.04-arm` (4 Neoverse-N2 cores, 16 GB, no KVM) | about **59 min** (run [40947396346](https://github.com/KickEm-Tools/KickEmulator/actions/runs/40947396346)): `KT_Kick-linux-arm64` built in Debian 12 in Docker 8 min 28 s, guest image provisioned under TCG 44 min 24 s (once; then cached), `smoke` 5 min 04 s: boot to SSH 50 s, deploy 40 s, `ktkick.service` to LIVE 43 s, `kickem run` to LIVE 3 min 22 s | **14 min 51 s** (run [40960336893](https://github.com/KickEm-Tools/KickEmulator/actions/runs/40960336893), image from the cache): artifact 8 min 42 s, `smoke` 5 min 09 s |
 
 The other checks add their own run time (`checks/README.md`): all seven in fast mode take about
 another 10 minutes after the build.
@@ -286,7 +287,14 @@ another 10 minutes after the build.
   `macos-latest` is `macos-26` (2026-10).
 - **Hosted arm64 Linux runners have no KVM** (`/dev/kvm` is missing on `ubuntu-24.04-arm`), so
   faithful mode runs QEMU under TCG: the guest is emulated, many times slower than the unit, and
-  its timings mean nothing. Provisioning the guest image (cloud-init installs about 200 packages)
+  its timings mean nothing. **It cannot check the audio there**: the engine renders at about 0.12
+  of real time (0.03 with `--screen embedded`, whose VNC encoding the workflow therefore avoids in
+  vm mode), so `smoke --mode vm` prints its audio results instead of asserting them and says
+  "audio not verified". What it does check there: the guest boots the unit's `ktkick.service`, the
+  panel's handshake over the guest's UART, PUSH loading the Starter Kit from `/app/demos`, the
+  LED and pad-colour packets, the screen (QMP screendumps) and that `KT_Kick` is still the same
+  process. With hvf (Apple Silicon) or KVM (an arm64 Linux host with `/dev/kvm`, such as a
+  self-hosted runner: pass `runner:`) the audio is asserted as in fast mode. Provisioning the guest image (cloud-init installs about 200 packages)
   takes about half an hour under TCG, against 2 minutes with hvf on a Mac; the workflow caches the
   provisioned image, keyed on `modes/vm/guest/`. The x86_64 runners (`ubuntu-24.04`) do have
   `/dev/kvm`, but for x86 guests only; an arm64 guest is TCG there too, and the artifact build

@@ -20,6 +20,7 @@ after another, records `results.tsv`) and `summary.py` (the job summary).
 | `checks` | `smoke` | space or comma separated; vm mode supports `smoke` only (the others report SKIP) |
 | `emulator-ref` | `v1` | keep it equal to the `@ref` in `uses:` |
 | `emulator-repository` | `KickEm-Tools/KickEmulator` | |
+| `screen` | fast: `embedded` (kickem's default); vm: `window` | `embedded` puts the Kick's screen inside the panel; in vm mode that means QEMU's VNC server, which slows a TCG guest down several times |
 | `ccache` | `true` | fast mode: compiler cache between runs |
 | `artifact-name` | `kickem-evidence-<mode>-<runner>` | |
 

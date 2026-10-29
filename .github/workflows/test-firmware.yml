@@ -45,6 +45,10 @@ on:
         description: "owner/name of the emulator repository"
         type: string
         default: KickEm-Tools/KickEmulator
+      screen:
+        description: "embedded (the screen inside the panel) or window; default: kickem's (embedded) in fast mode, window in vm mode (QEMU's VNC encoding costs a TCG guest a lot)"
+        type: string
+        default: ""
       ccache:
         description: "fast mode: cache compiler output between runs (ccache)"
         type: boolean
@@ -307,10 +311,11 @@ jobs:
         id: checks
         shell: bash
         run: |
+          screen='${{ inputs.screen }}'
           if [ "$MODE" = vm ]; then
-            set -- --mode vm --firmware "$GITHUB_WORKSPACE/firmware" --ref kickem-ci --artifact '${{ steps.build_vm.outputs.artifact }}'
+            set -- --mode vm --screen "${screen:-window}" --firmware "$GITHUB_WORKSPACE/firmware" --ref kickem-ci --artifact '${{ steps.build_vm.outputs.artifact }}'
           else
-            set -- --mode fast --firmware "$GITHUB_WORKSPACE/firmware" --ref kickem-ci --no-build
+            set -- --mode fast ${screen:+--screen "$screen"} --firmware "$GITHUB_WORKSPACE/firmware" --ref kickem-ci --no-build
           fi
           emulator/.github/ci/run-checks.sh "$EVIDENCE" "$CHECKS" "$@"
 

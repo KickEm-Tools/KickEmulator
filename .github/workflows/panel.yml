@@ -1,0 +1,201 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Builds kickem-panel for macOS arm64, Linux x86_64 and Linux arm64. On a tag panel-v* it attaches
+# the builds to a GitHub Release; workflow_dispatch and pull requests that touch the panel build
+# them as workflow artifacts only.
+#
+# The panel takes the protocol headers and control ids from a firmware checkout. A released panel
+# is built against KickEm-Tools/0700-AAM at the ref below (recorded in each build's
+# BUILD-INFO.txt); `kickem` always builds the panel from the firmware ref it runs, so a fork that
+# changes the protocol should use that, not a release.
+#
+# Windows is not built: the transports (pty, tcp, serial) are POSIX (termios, BSD sockets); a
+# Winsock port of the tcp transport would be needed first.
+name: panel
+
+on:
+  push:
+    tags: ["panel-v*"]
+  pull_request:
+    paths: ["panel/**", "transport/**", "cmake/**", "CMakeLists.txt", ".github/workflows/panel.yml"]
+  workflow_dispatch:
+    inputs:
+      firmware-ref:
+        description: "KickEm-Tools/0700-AAM ref the panel's protocol comes from"
+        default: main
+
+permissions:
+  contents: read
+
+env:
+  FIRMWARE_REPOSITORY: KickEm-Tools/0700-AAM
+  FIRMWARE_REF: ${{ inputs.firmware-ref || 'main' }}
+
+jobs:
+  build:
+    name: kickem-panel ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            runner: macos-14
+          # Ubuntu 22.04 (glibc 2.35), so the binary also starts on older distributions.
+          - target: linux-x86_64
+            runner: ubuntu-22.04
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+      CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: emulator
+          persist-credentials: false
+
+      - name: Check out the firmware (protocol headers)
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.FIRMWARE_REPOSITORY }}
+          ref: ${{ env.FIRMWARE_REF }}
+          path: firmware
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: JUCE version
+        id: juce
+        shell: bash
+        run: echo "tag=$(sed -n 's/^set(JUCE_GIT_TAG *\([^ )]*\).*/\1/p' firmware/Kick/3rdParty.cmake)" >> "$GITHUB_OUTPUT"
+
+      - name: CPM cache (JUCE)
+        uses: actions/cache@v5
+        with:
+          path: .cpm
+          key: panel-cpm-${{ runner.os }}-${{ runner.arch }}-juce${{ steps.juce.outputs.tag }}-${{ hashFiles('emulator/cmake/KickemCPM.cmake') }}
+
+      - name: Install packages (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            g++ cmake ninja-build pkg-config libfreetype6-dev libx11-dev libxext-dev libxinerama-dev \
+            libxrandr-dev libxcursor-dev libxcomposite-dev libxrender-dev libxi-dev libasound2-dev \
+            libcurl4-openssl-dev libglu1-mesa-dev mesa-common-dev file
+
+      - name: Configure
+        shell: bash
+        run: |
+          gen=""; [ "$RUNNER_OS" = Linux ] && gen="-G Ninja"
+          # shellcheck disable=SC2086
+          cmake -S emulator -B build $gen -DCMAKE_BUILD_TYPE=Release \
+            -DKICKEM_FIRMWARE_DIR="$GITHUB_WORKSPACE/firmware" -DKICKEM_PROTOCOL_JUCE=juce \
+            -DCPM_SOURCE_CACHE="$CPM_SOURCE_CACHE"
+
+      - name: Build
+        shell: bash
+        run: |
+          jobs=$( (nproc || sysctl -n hw.ncpu) 2>/dev/null )
+          cmake --build build --target kickem-panel --parallel "$jobs"
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          ver=${GITHUB_REF_NAME#panel-v}
+          [ "$GITHUB_REF_TYPE" = tag ] || ver="dev-$(git -C emulator rev-parse --short=10 HEAD)"
+          name="kickem-panel-$ver-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp build/panel/kickem-panel "dist/$name/"
+          strip "dist/$name/kickem-panel" 2>/dev/null || true
+          [ "$RUNNER_OS" = macOS ] && codesign --force --sign - "dist/$name/kickem-panel"   # ad-hoc: arm64 needs a signature
+          cp emulator/LICENSE "dist/$name/"
+          cp emulator/panel/README.md "dist/$name/README-panel.md"
+          {
+            echo "kickem-panel $ver for ${{ matrix.target }}"
+            echo "emulator:  $GITHUB_REPOSITORY $(git -C emulator rev-parse HEAD)"
+            echo "protocol:  $FIRMWARE_REPOSITORY $FIRMWARE_REF $(git -C firmware rev-parse HEAD) (ComProtocol/PktMgr, Kick/modules/contracts/dcl)"
+            echo "built:     $(date -u +%Y-%m-%dT%H:%M:%SZ) on $ImageOS $ImageVersion"
+            if [ "$RUNNER_OS" = Linux ]; then
+              echo "glibc:     $(ldd --version | head -1)"
+              echo "needs:     $(ldd "dist/$name/kickem-panel" | awk '{print $1}' | grep -v '^/' | tr '\n' ' ')"
+            fi
+            echo
+            if [ "$RUNNER_OS" = macOS ]; then
+              echo "macOS: the binary is not notarised. After downloading, run"
+              echo "    xattr -d com.apple.quarantine kickem-panel"
+              echo "or open it once from Finder with right-click > Open (or allow it in System Settings >"
+              echo "Privacy & Security). Needs macOS 12 or later on Apple Silicon."
+            else
+              echo "Linux: needs X11 and FreeType (Debian/Ubuntu: libx11-6 libxext6 libxrandr2 libxinerama1"
+              echo "libxcursor1 libfreetype6). Under Wayland it runs through Xwayland."
+            fi
+            echo
+            echo "Usage: kickem-panel --transport pty | tcp:HOST:PORT | serial:/dev/tty... [--control FILE]"
+            echo "See https://github.com/$GITHUB_REPOSITORY#readme"
+          } > "dist/$name/BUILD-INFO.txt"
+          cat "dist/$name/BUILD-INFO.txt"
+          file "dist/$name/kickem-panel"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          ( cd dist && (shasum -a 256 "$name.tar.gz" 2>/dev/null || sha256sum "$name.tar.gz") > "$name.tar.gz.sha256" )
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      # Starts the binary that was just packaged and checks it opens a pty (no app on the other
+      # end), so a release never ships a binary that cannot start.
+      - name: Start it
+        shell: bash
+        run: |
+          bin="dist/${{ steps.package.outputs.name }}/kickem-panel"
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get install -y -q --no-install-recommends xvfb xauth > /dev/null
+            run="xvfb-run -a"
+          else
+            run=""
+          fi
+          $run "$bin" --transport pty > panel-start.log 2>&1 &
+          pid=$!
+          for _ in $(seq 1 40); do grep -q "SimSerial: listening on" panel-start.log && break; sleep 0.5; done
+          kill "$pid" 2>/dev/null || true
+          cat panel-start.log | head -20
+          grep -q "SimSerial: listening on" panel-start.log
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            dist/${{ steps.package.outputs.name }}.tar.gz
+            dist/${{ steps.package.outputs.name }}.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'panel-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          cat > notes.md <<EOF
+          kickem-panel, the emulated Kick front panel, built by the \`panel\` workflow from ${GITHUB_SHA}.
+
+          | File | For |
+          |---|---|
+          | \`kickem-panel-*-macos-arm64.tar.gz\` | macOS 12+ on Apple Silicon (not notarised: \`xattr -d com.apple.quarantine kickem-panel\`, or right-click > Open) |
+          | \`kickem-panel-*-linux-x86_64.tar.gz\` | Linux x86_64, glibc 2.35+ (Ubuntu 22.04, Debian 12) |
+          | \`kickem-panel-*-linux-arm64.tar.gz\` | Linux arm64, glibc 2.35+ |
+
+          The protocol comes from ${FIRMWARE_REPOSITORY} ${FIRMWARE_REF} (see BUILD-INFO.txt in each archive). \`kickem\` builds its own panel from the firmware ref it runs; use a release to drive a unit's or a VM's serial port without building anything. No Windows build yet (the transports are POSIX).
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.sha256 -R "$GITHUB_REPOSITORY" \
+            --title "kickem-panel ${GITHUB_REF_NAME#panel-v}" --notes-file notes.md --verify-tag

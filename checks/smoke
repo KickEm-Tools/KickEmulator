@@ -128,14 +128,15 @@ until grep -q "$LOADED" "$KLOG"; do
 done
 if grep -q "$LOADED" "$KLOG"; then pass "PUSH loaded Starter Kit ($(grep -m1 "$LOADED" "$KLOG" | sed 's/^Project: loaded //'))"; else fail "PUSH did not load Starter Kit"; fi
 sleep 2
-if [ "$MODE" = vm ]; then
-    # Keys are ignored until the load has finished; its last step sends the pad colours. An
-    # emulated (TCG) guest gets there well after 'Project: loaded', so wait for them (up to 60 s).
-    i=0
-    until after PanelControl SMOKE_LOAD "$PLOG" | grep -q "^SimSurface: PAD cmd=6 " || [ "$i" -ge 120 ]; do
-        i=$((i + 1)); sleep 0.5
-    done
-    [ "$i" -gt 0 ] && say "   waited $(awk -v i="$i" 'BEGIN { printf "%.1f", 2 + i / 2 }') s after 'Project: loaded' for the load's pad colours"
+# Keys are ignored until the load has finished; its last step sends the pad colours. An emulated
+# (TCG) guest, or a slow CI runner (3 vCPUs), gets there well after 'Project: loaded', so wait for
+# them (up to 60 s) before PLAY.
+i=0
+until after PanelControl SMOKE_LOAD "$PLOG" | grep -q "^SimSurface: PAD cmd=6 " || [ "$i" -ge 120 ]; do
+    i=$((i + 1)); sleep 0.5
+done
+if [ "$i" -gt 0 ]; then
+    say "   waited $(awk -v i="$i" 'BEGIN { printf "%.1f", 2 + i / 2 }') s after 'Project: loaded' for the load's pad colours"
     sleep 1
 fi
 "$CTL" shot "$OUT/loaded.png" >/dev/null || fail "shot loaded.png"

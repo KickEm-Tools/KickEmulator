@@ -129,14 +129,16 @@ jobs:
       # JUCE (about 170 MB) and CPM itself. The firmware's CMake patches JUCE inside the cache,
       # so the key covers the patches too.
       - name: CPM cache (JUCE)
-        uses: actions/cache@v5
+        id: cpm
+        uses: actions/cache/restore@v5
         with:
           path: .kickem-cache/cpm
           key: kickem-cpm-${{ runner.os }}-${{ runner.arch }}-juce${{ steps.firmware.outputs.juce }}-${{ hashFiles('firmware/Kick/patches/**', 'firmware/Kick/get_cpm.cmake', 'emulator/cmake/KickemCPM.cmake') }}
 
       - name: ccache
+        id: ccache
         if: inputs.mode == 'fast' && inputs.ccache
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: .kickem-cache/ccache
           key: kickem-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -175,7 +177,7 @@ jobs:
                 mesa-common-dev libserial-dev xvfb xauth"
           [ "$MODE" = fast ] && pkgs="$pkgs pulseaudio pulseaudio-utils libasound2-plugins alsa-utils"
           [ '${{ inputs.ccache }}' = true ] && [ "$MODE" = fast ] && pkgs="$pkgs ccache"
-          [ "$MODE" = vm ] && pkgs="$pkgs qemu-system-arm qemu-efi-aarch64 qemu-utils cloud-image-utils openssh-client"
+          [ "$MODE" = vm ] && pkgs="$pkgs qemu-system-arm qemu-efi-aarch64 qemu-utils ipxe-qemu cloud-image-utils openssh-client"
           sudo apt-get update -q
           # shellcheck disable=SC2086
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $pkgs
@@ -229,6 +231,13 @@ jobs:
           log=$(find "$KICKEM_CACHE/build" -name build.log | head -1); [ -n "$log" ] && cp "$log" "$EVIDENCE/build.log"
           [ -n "${CCACHE_DIR:-}" ] && ccache -s | tee "$EVIDENCE/ccache.txt" | head -12 || true
 
+      - name: Save ccache
+        if: always() && inputs.mode == 'fast' && inputs.ccache && steps.build_fast.outcome != 'skipped'
+        uses: actions/cache/save@v5
+        with:
+          path: .kickem-cache/ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
+
       - name: Build the KT_Kick-linux-arm64 artifact and the panel (vm)
         id: build_vm
         if: inputs.mode == 'vm'
@@ -241,12 +250,20 @@ jobs:
           echo "artifact_s=$(( $(date +%s) - t0 ))" >> "$GITHUB_OUTPUT"
           echo "artifact=$RUNNER_TEMP/vm-artifact/KT_Kick-linux-arm64.tar.gz" >> "$GITHUB_OUTPUT"
 
+      # Saved as soon as the build is done, so a failing check does not lose them.
+      - name: Save the CPM cache
+        if: always() && steps.cpm.outputs.cache-hit != 'true' && (steps.build_fast.outcome == 'success' || steps.build_vm.outcome == 'success')
+        uses: actions/cache/save@v5
+        with:
+          path: .kickem-cache/cpm
+          key: ${{ steps.cpm.outputs.cache-primary-key }}
+
       # The provisioned guest image (stock Debian 12 arm64 plus cloud-init's packages) and the SSH
       # key baked into it. Provisioning under TCG takes many minutes, so it is cached.
       - name: VM image cache
         if: inputs.mode == 'vm'
         id: vmcache
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: |
             .kickem-cache/vm/kick-debian12-provisioned.qcow2
@@ -264,6 +281,25 @@ jobs:
           echo "provision_s=$(( $(date +%s) - t0 ))" >> "$GITHUB_OUTPUT"
           echo "cached=${{ steps.vmcache.outputs.cache-hit == 'true' }}" >> "$GITHUB_OUTPUT"
           cp "$KICKEM_CACHE/vm/provision-serial.log" "$EVIDENCE/" 2>/dev/null || true
+          cat "$KICKEM_CACHE/vm/provision-times.json" 2>/dev/null || true
+
+      - name: Save the VM image
+        if: inputs.mode == 'vm' && steps.vmcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            .kickem-cache/vm/kick-debian12-provisioned.qcow2
+            .kickem-cache/vm/id_ed25519
+            .kickem-cache/vm/id_ed25519.pub
+          key: ${{ steps.vmcache.outputs.cache-primary-key }}
+
+      - name: Provisioning logs
+        if: failure() && steps.provision.outcome == 'failure'
+        shell: bash
+        run: |
+          mkdir -p "$EVIDENCE/provision"
+          cp "$KICKEM_CACHE"/vm/provision/*.log "$EVIDENCE/provision/" 2>/dev/null || true
+          tail -40 "$EVIDENCE"/provision/qemu.log 2>/dev/null || true
 
       - name: Run the checks
         id: checks

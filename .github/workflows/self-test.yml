@@ -52,13 +52,3 @@ jobs:
       emulator-repository: ${{ github.repository }}
       emulator-ref: ${{ github.sha }}
 
-  fast-linux:
-    uses: ./.github/workflows/test-firmware.yml
-    with:
-      firmware-repository: KickEm-Tools/0700-AAM
-      firmware-ref: ${{ inputs.firmware-ref || 'main' }}
-      mode: fast
-      runner: ubuntu-24.04
-      checks: smoke
-      emulator-repository: ${{ github.repository }}
-      emulator-ref: ${{ github.sha }}

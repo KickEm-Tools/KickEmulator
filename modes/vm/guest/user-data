@@ -1,0 +1,144 @@
+#cloud-config
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Faithful mode: provisions the stock Debian 12 arm64 cloud image once (modes/vm/kickem_vm.py
+# provision). @PUBKEY@ is replaced with the cache's SSH key. The VM powers off when done; every
+# run then boots a throw-away overlay of the result. Nothing of the firmware is installed here:
+# the fork's KT_Kick, its data and its rootfs_overlay files are deployed on every run.
+hostname: kick-vm
+manage_etc_hosts: true
+ssh_pwauth: false
+disable_root: true
+users:
+  - name: kickem
+    gecos: KickEmulator
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - @PUBKEY@
+package_update: true
+packages:
+  # The app's shared libraries (the fork's shared-libraries.txt; deploy checks ldd again).
+  - libasound2
+  - libfreetype6
+  - libcurl4
+  - libx11-6
+  - libxext6
+  - libxrandr2
+  - libxinerama1
+  - libxcursor1
+  - libxcomposite1
+  - libxrender1
+  - libxi6
+  - libgl1
+  - libglu1-mesa
+  - libjack-jackd2-0
+  - libserial1
+  - fonts-dejavu-core
+  # The device's session: Weston (DRM backend on virtio-gpu) with Xwayland, as weston.ini says.
+  - weston
+  - xwayland
+  - kbd
+  # Audio (ALSA; snd-aloop is in the stock kernel), and what the app's Linux code calls.
+  - alsa-utils
+  # The commands the app's Linux code runs (kick_Hwpref.cpp, kick_WifiFirmware.cpp): ifconfig,
+  # killall, iwlist, wpa_supplicant, dhclient, udhcpc, timedatectl (systemd).
+  - net-tools
+  - psmisc
+  - wireless-tools
+  - wpasupplicant
+  - isc-dhcp-client
+  - udhcpc
+  - iw
+  # An access point on the second mac80211_hwsim radio, for the app's Wi-Fi scan to find.
+  - hostapd
+  - rsync
+write_files:
+  # The serial port belongs to the panel: no kernel console or getty on ttyAMA0. The console is
+  # the virtio console (hvc0), which run boots log to a file on the host. GRUB stays off serial.
+  - path: /etc/default/grub.d/99-kickem.cfg
+    content: |
+      GRUB_CMDLINE_LINUX_DEFAULT=""
+      GRUB_CMDLINE_LINUX="console=tty1 console=hvc0"
+      GRUB_TERMINAL=console
+      GRUB_TIMEOUT=0
+  # Two NICs on run boots: mgmt0 (SSH, forwarded to 127.0.0.1 on the host) and eth0, the device's
+  # Ethernet port, which the app configures itself (ifconfig eth0 192.168.0.1) as on the unit.
+  - path: /etc/systemd/network/10-kickem-mgmt0.link
+    content: |
+      [Match]
+      MACAddress=52:54:00:4b:1c:01
+      [Link]
+      Name=mgmt0
+  - path: /etc/systemd/network/10-kickem-eth0.link
+    content: |
+      [Match]
+      MACAddress=52:54:00:4b:1c:02
+      [Link]
+      Name=eth0
+  - path: /etc/systemd/network/20-kickem-mgmt0.network
+    content: |
+      [Match]
+      Name=mgmt0
+      [Network]
+      DHCP=ipv4
+  # ALSA: the loopback card is card 0, which the device's asound.conf plays to ("card0");
+  # a virtio sound card (run --sound) comes after it. mac80211_hwsim gives the app a wlan0.
+  - path: /etc/modules-load.d/kickem.conf
+    content: |
+      snd-aloop
+      mac80211_hwsim
+      9pnet_virtio
+  - path: /etc/modprobe.d/kickem.conf
+    content: |
+      options snd-aloop index=0 pcm_substreams=2
+      options virtio_snd index=1
+      options mac80211_hwsim radios=2
+  # wlan1 (the second simulated radio) is an open access point; the app scans and joins on wlan0.
+  - path: /etc/hostapd/kickem-ap.conf
+    content: |
+      interface=wlan1
+      driver=nl80211
+      ssid=KickEm-VM
+      hw_mode=g
+      channel=6
+  - path: /etc/systemd/system/kickem-ap.service
+    content: |
+      [Unit]
+      Description=KickEmulator: simulated Wi-Fi access point KickEm-VM on wlan1 (mac80211_hwsim)
+      After=sys-subsystem-net-devices-wlan1.device
+      BindsTo=sys-subsystem-net-devices-wlan1.device
+      [Service]
+      ExecStart=/usr/sbin/hostapd /etc/hostapd/kickem-ap.conf
+      [Install]
+      WantedBy=multi-user.target
+  # The device's directories (Kick/modules/common/source/kick_paths.cpp).
+  - path: /etc/tmpfiles.d/kickem.conf
+    content: |
+      d /app 0755 root root -
+      d /data/sounds 0755 root root -
+      d /home/Kick 0755 root root -
+      d /home/Kick/projects 0755 root root -
+      d /home/Kick/logs 0755 root root -
+      d /home/Kick/prefs 0755 root root -
+      d /mnt/kickem 0755 root root -
+runcmd:
+  - [systemctl, mask, serial-getty@ttyAMA0.service]
+  - [systemctl, enable, systemd-networkd]
+  - [systemctl, enable, kickem-ap.service]
+  # Debian 12's cloud image configures the network with netplan, which pins the provisioning NIC's
+  # name; the .link / .network files above replace it.
+  - [sh, -c, 'rm -f /etc/netplan/50-cloud-init.yaml /etc/network/interfaces.d/50-cloud-init* /etc/systemd/network/10-cloud-init-*']
+  - [sh, -c, 'printf "network: {config: disabled}\n" > /etc/cloud/cloud.cfg.d/99-kickem-network.cfg']
+  - [update-grub]
+  - [update-initramfs, -u]
+  - [systemd-tmpfiles, --create, /etc/tmpfiles.d/kickem.conf]
+  - [sh, -c, 'apt-get clean; rm -rf /var/lib/apt/lists/*']
+  - [sh, -c, 'dpkg-query -W -f "\${Package} \${Version}\n" weston xwayland linux-image-arm64 libasound2 hostapd wireless-tools > /var/log/kickem-provisioned.txt; uname -r >> /var/log/kickem-provisioned.txt']
+  # cloud-init ran once, for provisioning; run boots have no seed and must not re-run it.
+  - [touch, /etc/cloud/cloud-init.disabled]
+  - [sh, -c, 'echo KICKEM_PROVISIONED > /dev/hvc0 || true; echo KICKEM_PROVISIONED']
+power_state:
+  mode: poweroff
+  timeout: 120
+  condition: true

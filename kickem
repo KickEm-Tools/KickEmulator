@@ -4,8 +4,8 @@
 
     ./kickem fetch [--firmware URL|PATH] [--ref REF]
     ./kickem build [--firmware URL|PATH] [--ref REF]
-    ./kickem run   [--firmware URL|PATH] [--ref REF] [--mode fast|vm] [--detach] [--fresh]
-                   [--probe FILE.wav] [--throttle] [--out DIR] [--no-build]
+    ./kickem run   [--firmware URL|PATH] [--ref REF] [--mode fast|vm] [--screen embedded|window]
+                   [--detach] [--fresh] [--probe FILE.wav] [--throttle] [--out DIR] [--no-build]
     ./kickem stop
     ./kickem status
 
@@ -24,6 +24,13 @@ KICK_AUDIO_INPUT=silence (unless set), and waits for the control-surface handsha
 logs. In the foreground it runs until either program exits or Ctrl-C, then stops both.
 --detach returns after the handshake and leaves them running for `kickem stop` (the checks use
 this). The run's files (logs, control files, state.json) are in --out (default <cache>/run).
+
+--screen embedded (the default) shows the Kick's screen inside the panel's display cut-out, and
+clicks and drags on it are touches. Fast mode: the app is started with KICK_SCREEN_MIRROR=<unix
+socket> (firmware Kick/modules/test_control; its window then has no native window and it serves
+the screen over RFB); a ref without it falls back to window mode with a message. Faithful mode:
+QEMU's VNC server on a unix socket, and no QEMU window. --screen window: the app's own window
+(fast) or QEMU's display with --display (vm), as before.
 
 Only one emulator (or in-tree KT_KickEM simulator, or plain Kick) runs per machine. run holds a
 lock directory ($KICKEM_LOCK, default /tmp/kt_kickem.lock, the same lock and format as the
@@ -46,6 +53,7 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -213,6 +221,25 @@ def has_marker(path, marker):
         except OSError:
             pass
     return False
+
+
+# The embedded screen in fast mode (--screen embedded): the firmware's opt-in screen mirror.
+SCREEN_MIRROR = ("the screen mirror (KICK_SCREEN_MIRROR), for --screen embedded",
+                 "Kick/modules/test_control", "KICK_SCREEN_MIRROR", "feature/screen-mirror, PR #23")
+
+
+def has_screen_mirror(src):
+    return has_marker(os.path.join(src, SCREEN_MIRROR[1]), SCREEN_MIRROR[2])
+
+
+def screen_socket(d, name="screen.sock"):
+    """A unix socket path for the run (sun_path holds 104 bytes on macOS, 108 on Linux)."""
+    p = os.path.join(d, name)
+    if len(p.encode()) > 100:
+        p = "/tmp/kickem-%d-%s-%s" % (os.getuid(), hashlib.sha1(d.encode()).hexdigest()[:10], name)
+    if os.path.exists(p) or os.path.islink(p):
+        os.remove(p)
+    return p
 
 
 def preflight(src, ignore=False):
@@ -562,6 +589,14 @@ def stop_pid(pid, name, timeout=10.0):
     reap(pid)
 
 
+def remove_socket(p):
+    try:
+        if p and stat.S_ISSOCK(os.lstat(p).st_mode):
+            os.remove(p)
+    except OSError:
+        pass
+
+
 def stop_run(d, quiet=False):
     st = read_state(d)
     if not st:
@@ -570,6 +605,7 @@ def stop_run(d, quiet=False):
         return 0
     stop_pid(st.get("kick_pid", 0), "Kick")
     stop_pid(st.get("panel_pid", 0), "panel")
+    remove_socket(st.get("screen_socket"))
     release_lock((st.get("kick_pid", 0), st.get("panel_pid", 0), st.get("launcher_pid", 0)))
     st["stopped"] = time.time()
     write_state(d, st)
@@ -602,10 +638,23 @@ def cmd_run(a):
                 os.remove(f)  # never block on a stale FIFO
             open(f, "w").close()
 
+        # The screen: embedded in the panel through the firmware's mirror, or the app's window.
+        screen, screen_sock = a.screen, None
+        if screen == "embedded" and not has_screen_mirror(path):
+            say("--screen embedded: this ref lacks %s (%s in %s; KickEm-Tools/0700-AAM %s, in its main since "
+                "2026-10-29: merge or rebase onto it). Falling back to --screen window: the Kick screen is the "
+                "app's own window."
+                % (SCREEN_MIRROR[0], SCREEN_MIRROR[2], SCREEN_MIRROR[1], SCREEN_MIRROR[3]))
+            screen = "window"
+        if screen == "embedded":
+            screen_sock = screen_socket(d)
+
         # The panel, on a new pseudo-terminal.
         cmd = [panel_app(panel_build), "--transport", a.transport, "--control", panel_ctl]
         if a.throttle:
             cmd += ["--throttle", str(a.throttle)]
+        if screen_sock:
+            cmd += ["--screen", "embedded", "--screen-source", "unix:" + screen_sock]
         say("starting the panel: " + " ".join(shlex.quote(c) for c in cmd))
         with open(panel_log, "w") as lf:
             panel = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -627,8 +676,11 @@ def cmd_run(a):
             env["KICK_AUDIO_PROBE"] = os.path.abspath(a.probe)
         if IS_LINUX:
             env.setdefault("KICK_HARDWARE", "none")  # never ifconfig / timedatectl on this computer
+        env.pop("KICK_SCREEN_MIRROR", None)
+        if screen_sock:
+            env["KICK_SCREEN_MIRROR"] = screen_sock  # no native window; the screen is served to the panel
         app = kick_app(kick_build)
-        shown = {k: env[k] for k in ("KICK_SERIAL_DEVICE", "KICK_TEST_CONTROL", "KICK_AUDIO_INPUT",
+        shown = {k: env[k] for k in ("KICK_SERIAL_DEVICE", "KICK_TEST_CONTROL", "KICK_SCREEN_MIRROR", "KICK_AUDIO_INPUT",
                                      "KICK_AUDIO_PROBE", "KICK_HARDWARE", "KICK_LOG_NOTES") if k in env}
         say("starting Kick: cd %s && %s %s" % (kick_build, " ".join("%s=%s" % kv for kv in shown.items()), app))
         with open(kick_log, "w") as lf:
@@ -640,6 +692,7 @@ def cmd_run(a):
               "panel_build": panel_build, "kick_pid": kick.pid, "panel_pid": panel.pid,
               "launcher_pid": os.getpid(), "device": device, "kick_log": kick_log, "panel_log": panel_log,
               "panel_control": panel_ctl, "test_control": test_ctl, "probe": env.get("KICK_AUDIO_PROBE"),
+              "screen": screen, "screen_socket": screen_sock,
               "started": time.time(), "build_s": round(t_built - t_start, 1)}
         write_state(d, st)
 
@@ -652,6 +705,12 @@ def cmd_run(a):
         st["live_s"] = round(t_live - t_built, 1)
         write_state(d, st)
         say("handshake LIVE %.1f s after the build (%.1f s since kickem started)" % (t_live - t_built, t_live - t_start))
+        if screen_sock:
+            if wait_for(panel_log, r"ScreenView: first frame", 15, [kick.pid, panel.pid]):
+                say("the Kick screen is embedded in the panel (KICK_SCREEN_MIRROR=%s)" % screen_sock)
+            else:
+                say("warning: no frame from the screen mirror yet; see %s and %s" % (kick_log, panel_log))
+        print("screen    %s" % ("embedded in the panel" if screen_sock else "the app's own window"))
         print("device    %s" % device)
         print("kick log  %s" % kick_log)
         print("panel log %s" % panel_log)
@@ -745,7 +804,11 @@ def cmd_run_vm(a):
     lock_wait = time.monotonic() - t_wait
     started = []
     try:
-        st = vm.boot(d, a.accel, a.display, a.vm_serial, a.sound, a.disk or [])
+        vnc_sock = screen_socket(d, "vnc.sock") if a.screen == "embedded" else None
+        if vnc_sock and a.display:
+            say("--display is ignored with --screen embedded (the VM's screen is in the panel); use --screen window --display for QEMU's window")
+        st = vm.boot(d, a.accel, a.display and not vnc_sock, a.vm_serial, a.sound, a.disk or [], vnc=vnc_sock)
+        vm.update_state(d, screen=a.screen, screen_socket=vnc_sock)
         vm.update_state(d, lock_wait_s=round(lock_wait, 1))
         started.append((st["qemu_pid"], "QEMU"))
         set_lock_owner(st["qemu_pid"])
@@ -762,6 +825,8 @@ def cmd_run_vm(a):
         cmd = [panel_app(panel_build), "--transport", transport, "--control", panel_ctl]
         if a.throttle:
             cmd += ["--throttle", str(a.throttle)]
+        if vnc_sock:
+            cmd += ["--screen", "embedded", "--screen-source", "unix:" + vnc_sock]
         say("starting the panel on the VM's serial port: " + " ".join(shlex.quote(c) for c in cmd))
         with open(panel_log, "w") as lf:
             panel = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -789,6 +854,8 @@ def cmd_run_vm(a):
         say("handshake LIVE %.1f s after ktkick.service started (artifact + panel %.1f s, lock wait %.1f s, boot %.1f s, "
             "deploy %.1f s; %.1f s since kickem started)" % (t_live - t_app, t_built - t_start, lock_wait,
                                                              st.get("boot_s", 0), st.get("deploy_s", 0), t_live - t_start))
+        print("screen    %s" % ("embedded in the panel (QEMU VNC on %s)" % vnc_sock if vnc_sock else
+                                ("QEMU's window" if a.display else "headless (QMP screendumps)")))
         print("device    /dev/ttyAMA0 in the guest, %s here" % dev)
         print("kick log  %s" % kick_log)
         print("panel log %s" % panel_log)
@@ -823,6 +890,7 @@ def stop_run_vm(d, quiet=False):
     st = read_state(d) or {}
     stop_pid(st.get("panel_pid", 0), "panel")
     vm.stop(d, quiet=quiet)
+    remove_socket(st.get("screen_socket"))
     release_lock((st.get("qemu_pid", 0), st.get("panel_pid", 0), st.get("launcher_pid", 0)))
     if not quiet:
         say("stopped the VM (pid %s) and the panel (pid %s)" % (st.get("qemu_pid"), st.get("panel_pid")))
@@ -851,7 +919,7 @@ def cmd_status(a):
     if not st:
         say("no run in %s" % run_dir(a))
         return 1
-    for k in ("firmware", "ref", "commit", "device", "kick_pid", "panel_pid", "kick_log", "panel_log"):
+    for k in ("firmware", "ref", "commit", "device", "screen", "kick_pid", "panel_pid", "kick_log", "panel_log"):
         extra = ""
         if k.endswith("_pid"):
             extra = " (running)" if alive(st.get(k, 0)) else " (gone)"
@@ -892,11 +960,13 @@ def main(argv=None):
     r.add_argument("--probe", metavar="FILE.wav", help="KICK_AUDIO_PROBE: write the master output there, log AudioProbe: lines")
     r.add_argument("--throttle", type=int, nargs="?", const=230400, default=0, metavar="BAUD", help="pace the panel's link at the unit's UART rate (default 230400)")
     r.add_argument("--transport", default="pty", help="panel transport: pty, tcp:HOST:PORT, serial:DEV[@BAUD] (default: pty)")
+    r.add_argument("--screen", choices=("embedded", "window"), default="embedded",
+                   help="embedded: the Kick screen inside the panel, clickable; window: the app's own window / QEMU's display (default: %(default)s)")
     r.add_argument("--out", help="directory for the run's logs, control files and state (default: <cache>/run)")
     vmo = r.add_argument_group("faithful mode (--mode vm, modes/vm/README.md)")
     vmo.add_argument("--artifact", metavar="TARBALL|DIR", help="a KT_Kick-linux-arm64 artifact (modes/vm/artifact.sh); default: build the ref in Docker")
     vmo.add_argument("--accel", choices=("hvf", "kvm", "tcg"), help="QEMU accelerator (default: hvf on Apple Silicon, kvm on arm64 Linux, else tcg)")
-    vmo.add_argument("--display", action="store_true", help="show the VM's screen in a window (default: headless)")
+    vmo.add_argument("--display", action="store_true", help="with --screen window: show the VM's screen in QEMU's window (default: headless)")
     vmo.add_argument("--vm-serial", choices=("pty", "tcp"), default="pty", help="the guest UART on a pty (default) or a TCP socket (Windows)")
     vmo.add_argument("--sound", action="store_true", help="add a virtio sound card that plays to this computer's output")
     vmo.add_argument("--disk", action="append", metavar="IMG", help="extra disk image (USB mass storage), e.g. a stand-in SD card or USB stick")

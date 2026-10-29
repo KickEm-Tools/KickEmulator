@@ -681,6 +681,24 @@ namespace sim
     void Simulator::setLinkStatus( const juce::String& Text )
     {
         linkStatus = Text;
+        if( screenView != nullptr )
+            screenView->setStatusText( Text );
+        repaint( screenX, screenY, screenW, screenH );
+    }
+
+    void Simulator::setEmbeddedScreen( std::unique_ptr<ScreenView> Screen )
+    {
+        if( screenView != nullptr )
+            removeChildComponent( screenView.get() );
+        screenView = std::move( Screen );
+        if( screenView != nullptr )
+        {
+            // The cut-out is screenW x screenH canvas units for 1024 x 600 pixels; the panel's
+            // transform (ScaledPanel) scales both with the window. Clicks inside it are touches.
+            screenView->setBounds( screenX, screenY, screenW, screenH );
+            screenView->setStatusText( linkStatus );
+            addAndMakeVisible( *screenView );
+        }
         repaint( screenX, screenY, screenW, screenH );
     }
 
@@ -834,14 +852,18 @@ namespace sim
         g.setFont( panelFont( 20.f ) );
         g.drawText( "KICK", bezelRect.withTop( bezelRect.getBottom() - 38.f ), juce::Justification::centred );
 
-        // The screen itself is the app's window, in its own process. The cut-out shows the link.
+        // The screen: embedded (a ScreenView child covers the cut-out), or the app's own window /
+        // the VM's display, in which case the cut-out shows the link.
         const auto screen = juce::Rectangle<int>( screenX, screenY, screenW, screenH ).toFloat();
         g.setColour( juce::Colour( 0xff050607 ) );
         g.fillRect( screen );
-        g.setColour( printDim );
-        g.setFont( panelFont( 15.f, false ) );
-        g.drawFittedText( "The Kick screen is the app's own window.\nControl surface link: " + linkStatus,
-                          screen.reduced( 20.f ).toNearestInt(), juce::Justification::centred, 3 );
+        if( screenView == nullptr )
+        {
+            g.setColour( printDim );
+            g.setFont( panelFont( 15.f, false ) );
+            g.drawFittedText( "The Kick screen is the app's own window.\nControl surface link: " + linkStatus,
+                              screen.reduced( 20.f ).toNearestInt(), juce::Justification::centred, 3 );
+        }
 
         // Camera module (top left).
         g.setColour( juce::Colour( 0xff0d0d0d ) );

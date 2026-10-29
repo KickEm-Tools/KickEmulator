@@ -14,6 +14,16 @@ image without a unit.
 > `/goal-standalone` on the firmware work branch `rbdone/goal-simulator-controls`
 > (`.claude/commands/goal-standalone.md`).
 
+[![The emulator in fast mode with the Kick's screen embedded: the Projects screen, PUSH loads the Starter Kit, PLAY, pads hit while it plays, TRACK MIX with the Drums level moved, MAIN, STOP](docs/media/kickem-demo.gif)](docs/media/kickem-demo.mp4)
+
+*Fast mode, `--screen embedded` (the default): the fork's own `Kick` app, its screen inside the
+panel's bezel, loading and playing the Starter Kit. With sound:
+[`docs/media/kickem-demo.mp4`](docs/media/kickem-demo.mp4) (33 s, H.264 + AAC; GitHub does not
+play a repository's videos inline, so the link opens its player). Both are made by
+[`docs/make_demo_video.sh`](docs/make_demo_video.sh): the panel renders its own frames
+(`kickem_ctl record`) and the sound is the app's master output (`--probe`), so no desktop is
+captured.*
+
 The firmware itself needs no emulator code. The only coupling is the control-surface serial
 protocol (`CPktMgr`, `ComProtocol/PktMgr`). The panel is a separate program that speaks the
 microcontroller's side of that protocol over a transport: a pseudo-terminal, a TCP socket, or a
@@ -27,18 +37,19 @@ Needs Xcode's command-line tools, CMake 3.22+, git and Python 3.8+.
 
 ```sh
 git clone https://github.com/KickEm-Tools/KickEmulator.git && cd KickEmulator
-./kickem run --ref integration/standalone        # fetch, build, start the panel and Kick, connect them
+./kickem run                                     # fetch KickEm-Tools/0700-AAM main, build, start the panel and Kick
 ```
 
-Two windows open: the panel, and the Kick's screen (the fork's own `Kick` app). On the Projects
-screen, press **PUSH** on the panel to load the Starter Kit, then **PLAY** (the round green key).
-Ctrl-C in the terminal stops both. The first run downloads JUCE (about 170 MB) into
+One window opens: the panel, with the Kick's screen (the fork's own `Kick` app) inside it. On the
+Projects screen, press **PUSH** on the panel to load the Starter Kit, then **PLAY** (the round green
+key). Click or drag on the screen as you would touch the unit's. Ctrl-C in the terminal stops both.
+`--screen window` gives the app its own window instead, as before. The first run downloads JUCE (about 170 MB) into
 `~/.cache/kickem/cpm` unless `CPM_SOURCE_CACHE` points at a cache that has it.
 
-`integration/standalone` is a scratch branch of `KickEm-Tools/0700-AAM` that merges every open
-pull request. Since 2026-10-29 `main` has what fast mode needs, and `checks/smoke` passes against
-it in CI (see [Pointing it at your fork](#pointing-it-at-your-fork) for the drift of the other
-checks).
+The embedded screen needs the firmware's opt-in screen mirror (`KICK_SCREEN_MIRROR`), which is in
+`KickEm-Tools/0700-AAM` `main` (pull request #23). Any other ref works as well (`--ref BRANCH`,
+`--firmware URL`); one without the mirror runs with the screen in its own window, and `kickem`
+says so (see [Pointing it at your fork](#pointing-it-at-your-fork)).
 
 **How long it takes** (Apple Silicon, 16 cores, JUCE already in the CPM cache), measured by
 `checks/smoke` from a cold cache on 2026-10-28:
@@ -60,6 +71,55 @@ Both modes use the same panel and the same checks.
 | For | Quick edits and rebuilds, a debugger, scripted checks | The device's Linux code paths and services; CI on firmware pull requests |
 | Needs in the firmware | It builds on the desktop, has a working serial port, and has a few generic, opt-in extension points (`KICK_SERIAL_DEVICE`, `KICK_TEST_CONTROL`, `KICK_AUDIO_PROBE`, ...) | A working serial port |
 | State | works on macOS; Linux desktop not tried | works on macOS (Apple Silicon, hvf; TCG too); Linux hosts not tried |
+
+### The screen: embedded or in its own window
+
+`--screen embedded` (the default) puts the Kick's 1024x600 screen in the panel's display cut-out.
+It scales with the panel when the window is resized, and a click, a drag or a held press on it is
+a touch on the unit's screen: list rows, buttons, knobs, sliders and the popups and dialogs drawn
+over them. `--screen window` keeps the screen out of the panel: the app's own window in fast mode,
+and QEMU's display window with `--display` in faithful mode (headless without it).
+
+| | Fast mode | Faithful mode |
+|---|---|---|
+| Embedded: where the screen comes from | The app itself, started with `KICK_SCREEN_MIRROR=<unix socket>`: its window then has no native window; JUCE paints it with the software renderer (as on the unit) and the app serves it over RFB ("VNC"), at most 30 frames a second, only what changed | QEMU's own VNC server on the VM's display (`-vnc unix:<socket>`); no firmware change |
+| Embedded: where a click goes | Over the socket to the app's window peer, which hands it to JUCE as a native window's mouse events: JUCE dispatches it as a touch | Over the socket to QEMU, which moves the VM's `usb-tablet` (absolute) and presses it; Weston and Xwayland deliver it to the app |
+| Embedded: what it needs in the firmware | `KICK_SCREEN_MIRROR` (in `main` since PR #23); without it `kickem` falls back to window mode and says so | nothing |
+| Window | The app's own window (`touch` from the test-control module needs it topmost) | QEMU's window with `--display`, else headless |
+
+The embedded screen uses no operating-system input: it works with the Mac locked or the panel
+covered, and nothing of the app appears on the desktop (no window, no Dock icon). Scripts click
+it through the panel (`kickem_ctl screentouch X Y`, the same path as the mouse) and read what the
+panel shows (`kickem_ctl screenshot`, `kickem_ctl screen` for the frame rate and the
+touch-to-frame latency). `checks/embedded_screen` proves a click selects a list row and opens a
+dialog, and that the dialog shows inside the embedded screen.
+
+| Window mode, fast: the panel and the app's own window | Embedded, a dialog opened by a click on the screen |
+|---|---|
+| ![Window mode: the panel and the separate Kick window](docs/images/window-mode.png) | ![A dialog shown inside the embedded screen](docs/images/embedded-dialog.png) |
+
+![The panel with the live Kick screen embedded: the Starter Kit loaded and playing](docs/images/embedded-fast-playing.png)
+
+*Fast mode, embedded: the Starter Kit playing. Clicks and drags on the screen are touches.*
+
+![Faithful mode: the VM's screen embedded in the panel](docs/images/embedded-vm.png)
+
+*Faithful mode, `--screen embedded`: the fork's Linux arm64 `KT_Kick` in the QEMU VM, its display
+(Weston and Xwayland at 1024x600) in the panel through QEMU's VNC server.*
+
+**Measured** (Apple M4 Max, 2026-10-29, `checks/embedded_screen` and `checks/smoke`; `kickem_ctl
+screen` reports the same numbers on a running emulator):
+
+| | Fast mode (screen mirror) | Faithful mode (QEMU VNC, hvf) |
+|---|---|---|
+| Updates while the transport plays (BAR:BEAT:TICK, meters) | 29.2-29.3 per second (the mirror's cap is 30) | 29.3 per second |
+| Updates on a still screen | none (only changed areas are sent) | none |
+| Click to the first changed frame | 6-8 ms (list row), at most 32 ms | 80-175 ms (QEMU, Weston, Xwayland and the app in the VM) |
+| Data on the socket over a smoke run (load, eight seconds of playing) | 26 MB (changed rectangles, raw) | 54 MB |
+| CPU while playing | Kick about 11 %, the panel about 7 % of one core | |
+
+These are the emulator's numbers, not the unit's: the unit's own display path has no socket in
+it.
 
 ## What each mode cannot tell you
 
@@ -113,8 +173,8 @@ glibc 2.39) does not start in the Debian 12 guest, so faithful mode builds its o
 ```sh
 ./kickem fetch [--firmware URL|PATH] [--ref REF]     # clone or update into ~/.cache/kickem/firmware
 ./kickem build [--firmware URL|PATH] [--ref REF]     # fetch, build Kick and the panel, install the Starter Kit
-./kickem run   [--firmware URL|PATH] [--ref REF] [--mode fast] [--detach] [--fresh] [--probe OUT.wav]
-               [--throttle [BAUD]] [--no-build] [--out DIR]
+./kickem run   [--firmware URL|PATH] [--ref REF] [--mode fast|vm] [--screen embedded|window] [--detach]
+               [--fresh] [--probe OUT.wav] [--throttle [BAUD]] [--no-build] [--out DIR]
 ./kickem stop                                        # stop a --detach run, release the lock
 ./kickem status
 ```
@@ -125,6 +185,9 @@ glibc 2.39) does not start in the Debian 12 guest, so faithful mode builds its o
   so saves and recent projects from an earlier run do not leak in.
 - `--probe OUT.wav` sets `KICK_AUDIO_PROBE`: the app writes its master output there and logs
   `AudioProbe: t=<n>s peak=<x>dBFS rms=<y>dBFS` each second.
+- `--screen embedded` (default) shows the Kick's screen inside the panel; `--screen window` gives
+  it its own window (fast) or QEMU's window with `--display` (vm). See
+  [The screen](#the-screen-embedded-or-in-its-own-window).
 - `--throttle` paces the panel's link at the unit's 230400 baud.
 - `KICK_AUDIO_INPUT` defaults to `silence` (no path from the microphone to the speakers); set it to
   `device` for the real input.
@@ -152,9 +215,8 @@ process runs without the lock. A lock whose owner has died is reclaimed; otherwi
 checks/smoke --firmware ~/src/0700-AAM --ref <your-branch>
 ```
 
-Fast mode needs these changes in the fork. All of them are in `KickEm-Tools/0700-AAM` `main`
-since 2026-10-29; a fork of the upstream release (`MusicTribeOpenSource/0700-AAM`) needs them
-merged, or its branch based on `KickEm-Tools/0700-AAM` `main`:
+Fast mode needs these changes in the fork. All of them are merged into `KickEm-Tools/0700-AAM`
+`main` (2026-10-29); a fork that branched off before them needs them merged or rebased in:
 
 | Needed for | Branch (pull request) | Without it |
 |---|---|---|
@@ -163,9 +225,11 @@ merged, or its branch based on `KickEm-Tools/0700-AAM` `main`:
 | screen commands (`KICK_TEST_CONTROL`), audio probe and test input, `KICK_HARDWARE` | `feature/desktop-seams` (#2) | warning; checks that need them fail |
 | the Starter Kit's samples (relative sample paths) | `fix/relative-sample-paths` (#7) | warning |
 | SHIFT functions from a control surface | `fix/shift-state` (#16) | SHIFT + key behaviours do nothing (as on a unit today) |
+| the screen inside the panel (`--screen embedded`, fast mode) | `feature/screen-mirror` (#23) | the screen is the app's own window, with a message |
 
-`kickem` checks the fetched tree for these before building and names what is missing. Against
-the upstream release (`27194180`) it says the first two are missing; with `--ignore-missing` the configure fails, because CPM tries to clone `AudIO` from the
+`kickem` checks the fetched tree for these before building and names what is missing. Against a
+tree without them (upstream, `27194180`, which `KickEm-Tools/0700-AAM` `main` equalled before these
+merges) it says the first two are missing; with `--ignore-missing` the configure fails, because CPM tries to clone `AudIO` from the
 placeholder server `https://example.com/your-git-server`.
 
 ## Add it to your fork's CI
@@ -273,18 +337,19 @@ Each archive has `BUILD-INFO.txt` with the firmware commit its protocol headers 
 | 5b | `checks/transport`, `modes`, `pads`, `sampler_looper`, `overlays` (ports of the in-tree `sim_*.sh`) and `serial_faults` (/goal-serial phase 5); panel fault injection (`raw`, `split`, `close`, `reopen`) | done: all pass against `integration/standalone` (2026-10-29); the fault test found the reader bugs fixed in KickEm-Tools/0700-AAM #17; drift against `main` in `checks/README.md` |
 | 6 | Faithful mode: QEMU arm64 VM with the fork's `KT_Kick-linux-arm64`, panel on the VM's serial port | done: `kickem run --mode vm`, `checks/smoke --mode vm` passes (hvf and TCG) against `integration/standalone` |
 | 7 | Reusable CI workflow for forks (`test-firmware.yml`), the emulator's own CI (`self-test.yml`), panel release builds (`panel.yml`) | done: fast smoke and faithful smoke pass in CI against `KickEm-Tools/0700-AAM` `main`; panel builds for macOS arm64, Linux x86_64 and arm64. Not yet tagged: `v1` and `panel-v0.1.0` wait for the go-ahead |
+| - | The embedded screen (`--screen embedded`): the firmware's `KICK_SCREEN_MIRROR` in fast mode, QEMU's VNC server in faithful mode; `checks/embedded_screen` | done, see [The screen](#the-screen-embedded-or-in-its-own-window) |
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `panel/` | The front panel, `kickem-panel` (see `panel/README.md`) |
+| `panel/` | The front panel, `kickem-panel`, and its embedded screen (`ScreenView`, an RFB client); see `panel/README.md` |
 | `transport/` | pty, TCP and serial transports for the panel, and the throttle |
 | `cmake/` | `KickemFirmware.cmake`: fetches the firmware by URL and ref, and exposes the protocol targets |
 | `tools/protocol_roundtrip/` | Encodes and decodes packets with the fetched ref's `CPktMgr`, as the app's serial reader does |
 | `modes/fast/` | How fast mode builds and runs a fork (it lives in `kickem`) |
 | `modes/vm/` | Faithful mode: `kickem_vm.py` (image, provisioning, boot, deploy, QMP), `artifact.sh`, `guest/`, `run.sh` |
-| `checks/` | `smoke`, `transport`, `modes`, `pads`, `sampler_looper`, `overlays`, `serial_faults`; `lib/` (`kickem_ctl`, `common.sh`, `wav_measure.py`, `row_highlight.py`). See `checks/README.md` |
+| `checks/` | `smoke`, `transport`, `modes`, `pads`, `sampler_looper`, `overlays`, `serial_faults`, `embedded_screen`; `lib/` (`kickem_ctl`, `common.sh`, `wav_measure.py`, `row_highlight.py`, `png_diff.py`). See `checks/README.md` |
 | `content/StarterKit/` | The Starter Kit: synthesised samples and a demo project, CC0 |
 | `kickem` | The launcher |
 | `.github/workflows/`, `.github/ci/` | `test-firmware.yml` (the reusable workflow for forks), `self-test.yml` (this repository's CI), `panel.yml` (panel builds and releases); the scripts they run. See `.github/workflows/README.md` |
@@ -309,7 +374,10 @@ satisfied.
   files byte for byte. `kickem` installs it into the build's data paths
   (`content/StarterKit/README.md`).
 - **No logo.** The emulator draws no manufacturer logo or other trademarks: the area above the
-  screen, where the unit carries its logo, is left blank.
+  screen, where the unit carries its logo, is left blank. The model name under the screen stays.
+- **Screenshots** in `docs/images/` are the panel's and the app's own renders (`kickem_ctl
+  panelshot`, `shot`, `screenshot`), not desktop captures. So is the video in `docs/media/`
+  (`kickem_ctl record`, `docs/make_demo_video.sh`); its sound is the Starter Kit.
 - Never committed: firmware build outputs, VM disk images, Buildroot downloads, NXP firmware or
   driver blobs (see `.gitignore`).
 

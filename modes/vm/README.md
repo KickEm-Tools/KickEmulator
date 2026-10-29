@@ -53,7 +53,8 @@ rule's unit) is the fork's own file.
 |---|---|---|
 | i.MX UART `/dev/ttymxc0`, 230400 8N1, to the panel MCU | PL011 `/dev/ttyAMA0`; QEMU `-serial chardev:panel` on a pty (`-chardev pty`) or a TCP socket (`--vm-serial tcp`, for Windows hosts) | The app gets `KICK_SERIAL_DEVICE=/dev/ttyAMA0`. No udev symlink to `/dev/ttymxc0`: the variable is the firmware's documented way to name the port, and the app's log then says which path it opened. Nothing else talks on ttyAMA0: the kernel console and getty are on the virtio console `hvc0` (`<run>/boot.log`), the machine runs with `acpi=off` so no SPCR console appears on the UART, and GRUB is off serial |
 | 1024x600 LCD, Vivante GPU | `virtio-gpu-pci,xres=1024,yres=600`. Weston's DRM backend picks 1024x600 as preferred and current; GL by llvmpipe | |
-| Touch screen | `usb-tablet` (absolute pointer). A touch is QMP `input-send-event` with `abs` axes, then a left-button press and release | `kickem_ctl tap X Y` |
+| Touch screen | `usb-tablet` (absolute pointer). A touch is QMP `input-send-event` with `abs` axes, then a left-button press and release; with the screen embedded, the panel's clicks arrive as VNC pointer events on the same tablet | `kickem_ctl tap X Y`, `kickem_ctl screentouch X Y` |
+| Screen in the panel | QEMU's VNC server on a unix socket (`--screen embedded`), raw encoding to the panel's RFB client | `kickem run --mode vm` (default) |
 | Screen capture | QMP `screendump` (PNG) of the VM's display | `kickem_ctl shot OUT.png` |
 | Codec (ALSA card 0) | `snd-aloop` as card 0, so the unit's `asound.conf` (`card0`, `S32_LE`, 48 kHz through `plug`) works unchanged; JUCE opens `default`. `--sound` adds a virtio sound card (card 1) that plays to this computer's output | Sound is asserted with the firmware's `KICK_AUDIO_PROBE`, not by listening |
 | Ethernet `eth0` | A virtio NIC named `eth0` (by MAC) on its own isolated user-mode network. The app configures it (`ifconfig eth0 192.168.0.1`) as on the unit | SSH has a second NIC, `mgmt0`, forwarded to `127.0.0.1` only |
@@ -104,8 +105,12 @@ modes/vm/kickem_vm.py shot --out RUN OUT.png    # a screendump (QMP)
 checks/lib/kickem_ctl tap X Y | shot OUT.png    # the same through the checks' tool (vm mode)
 ```
 
-- `--display` opens the VM's screen in a window (`-display cocoa` on macOS). The default is
-  headless.
+- `--screen embedded` (the default of `kickem run`) starts QEMU with its VNC server on a unix
+  socket (`-vnc unix:<run>/vnc.sock`, or a short path under `/tmp` when that is too long) and no
+  display window; the panel shows the VM's screen in its cut-out and sends clicks and drags to
+  QEMU, which turns them into absolute events on the `usb-tablet` (Weston, Xwayland, the app).
+  Nothing in the firmware is involved. `--screen window` is the previous behaviour:
+  `--display` opens the VM's screen in a window (`-display cocoa` on macOS), else it is headless.
 - `--no-start-delay` starts `/usr/bin/KT_Kick` directly. By default the unit's own `kt_kick.sh`
   runs, and it sleeps 15 s before starting the app, as on the unit.
 - Every other `kickem_ctl` command (`press`, `turn`, `echo`, `status`, `list`, `click`, ...) works
@@ -205,7 +210,10 @@ the month.
 
 A run's overlay (`<run>/disk.qcow2`, about 100-200 MB) is deleted when the VM stops. The artifact
 is `~/.cache/kickem/build/<firmware>/<ref>/vm-artifact/` (33 MB). Docker keeps the image
-`kickem-vm-builder:bookworm` (1.2 GB) and the volume `kickem-vm-build` (CPM cache and build tree,
-about 470 MB) for incremental builds; remove them with
+`kickem-vm-builder:bookworm` (1.2 GB) and the volume `kickem-vm-build` (CPM cache, and one build
+tree per firmware checkout, `build-<hash of its path>`, about 470 MB each) for incremental builds.
+Until 2026-10-29 every checkout shared one tree: a freshly fetched ref whose files were older than
+another ref's outputs was not recompiled, and its artifact held the other ref's binary under its
+own manifest. Artifacts built before then by `--build` may be wrong; rebuild them. Remove them with
 `docker image rm kickem-vm-builder:bookworm && docker volume rm kickem-vm-build`. To start over,
 delete `~/.cache/kickem/vm`.

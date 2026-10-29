@@ -17,23 +17,37 @@
 //                       one KNOBS packet per detent
 //   slider VALUE        the slider, 0..100
 //   repeat MS N NAME    press NAME N times, MS ms apart (absolute schedule); each press logged
-//   shot FILE.png       render the panel to FILE.png, in-process
+//   shot FILE.png [SCALE]  render the panel to FILE.png, in-process (SCALE: 2 = 2480x2500)
+//   screen              log the embedded screen's state ("PanelControl: screen connected
+//                       size=1024x600 updates=.. fps5s=.. latency_ms=.."; --screen embedded)
+//   screentouch X Y [X2 Y2 [MS]]  click the embedded screen at pixel (X, Y), or drag from there
+//                       to (X2, Y2) over MS ms (default 300), through the mouse's own path
+//   screenshot FILE.png the embedded screen's last frame as received, at its own size
 //   list [FILTER]       log the panel's named controls ("PanelControl: item ...")
+//   resize W H          resize the panel's window (the panel and an embedded screen scale with it)
 //   link                log the link's state and frame counters ("PanelControl: link ...")
 //   raw HEX...          fault injection: write these bytes as they are, in one write
 //   split MS HEX1 HEX2  fault injection: write HEX1, wait MS ms, write HEX2 (two reads)
 //   close / reopen      fault injection: close the transport (the app sees a hang-up) / open
 //                       it again (with pty:<link>, the link then names the new pty)
+//   record START DIR [FPS [SCALE]]  render the panel FPS times a second (default 30, scale 1 =
+//                       1240x1250), in-process as shot does, into DIR/frame-NNNNNN.png, with
+//                       DIR/frames.txt: one line per frame, "<file> <wall clock, ms since 1970>",
+//                       and one per command run meanwhile, "# <wall clock ms> <seq> <command>"
+//   record STOP         stop, wait for the frames still being written, log
+//                       "PanelControl: record stopped frames=.. dropped=.. fps=.. render_ms=.."
 //   echo TEXT           log "PanelControl: echo TEXT" (a marker for scripts)
 //
 // Nothing here needs a window server: controls are driven directly, so it works while the
-// Mac's screen is locked or the window is covered.
+// Mac's screen is locked or the window is covered; record needs no Screen Recording permission.
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 namespace sim
 {
+    class FrameRecorder;
+
     class PanelControl : private juce::Timer
     {
     public:
@@ -57,5 +71,6 @@ namespace sim
         juce::String                  partial;
         juce::StringArray             queue;
         bool                          busy{ false };
+        std::unique_ptr<FrameRecorder> recorder;
     };
 } // namespace sim

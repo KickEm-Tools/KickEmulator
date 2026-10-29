@@ -14,7 +14,22 @@ Panel (acked as "PanelControl: ok <n>" in the panel log):
     turn KNOB STEPS          encoder P1..P4 or JOG, signed detents (one packet each)
     slider VALUE             the slider, 0..100
     repeat MS N NAME         press a panel control N times, MS ms apart (timed in the panel)
-    panelshot OUT.png        render the panel
+    panelshot OUT.png [SCALE]  render the panel (SCALE 2: 2480x2500)
+    record START DIR [FPS [SCALE]]
+                             render the panel FPS times a second (default 30), in-process like
+                             panelshot, into DIR/frame-NNNNNN.png and DIR/frames.txt ("<file>
+                             <wall clock ms>" per frame); no Screen Recording permission needed
+    record STOP              stop; prints frames, dropped, fps and render time per frame
+Embedded screen (kickem run --screen embedded; acked by the panel):
+    screen                   the embedded screen's state: connected, size, updates, frames per
+                             second over the last 5 s, touch-to-frame latency
+    screentouch X Y [X2 Y2 [MS]]
+                             click the embedded screen at pixel (X,Y) of the 1024x600 screen, or
+                             drag to (X2,Y2) over MS ms, through the panel's own mouse path: the
+                             panel sends it to the app (fast) or to QEMU (vm) as a touch; works
+                             with the screen locked
+    screenshot OUT.png       the embedded screen's last frame as the panel received it
+    resize W H               resize the panel's window (the embedded screen scales with it)
     link                     the link's state and frame counters
     raw HEX                  fault injection: these bytes, as they are, in one write
     split MS HEX1 HEX2       fault injection: HEX1, a pause of MS ms, HEX2 (two reads)
@@ -182,8 +197,20 @@ def main(argv):
     elif cmd == "repeat" and len(args) >= 3:
         ms, n = int(args[0]), int(args[1])
         out(panel.send("repeat %d %d %s" % (ms, n, q(" ".join(args[2:]))), timeout=TIMEOUT + ms * n / 1000.0 + 1), "repeat")
-    elif cmd == "panelshot" and len(args) == 1:
-        out(panel.send("shot " + q(os.path.abspath(args[0]))), "shot")
+    elif cmd == "panelshot" and len(args) in (1, 2):
+        out(panel.send("shot " + q(os.path.abspath(args[0])) + (" " + args[1] if len(args) == 2 else "")), "shot")
+    elif cmd == "record" and len(args) >= 2 and args[0] == "START":
+        out(panel.send("record START %s %s" % (q(os.path.abspath(args[1])), " ".join(args[2:]))), "record")
+    elif cmd == "record" and args == ["STOP"]:
+        out(panel.send("record STOP", timeout=TIMEOUT + 30), "record")
+    elif cmd == "resize" and len(args) == 2:
+        out(panel.send("resize %s %s" % tuple(args)), "resize")
+    elif cmd == "screen" and not args:
+        out(panel.send("screen"), "screen")
+    elif cmd == "screentouch" and len(args) in (2, 4, 5):
+        panel.send("screentouch " + " ".join(args), timeout=TIMEOUT + (float(args[4]) / 1000.0 if len(args) == 5 else 0))
+    elif cmd == "screenshot" and len(args) == 1:
+        out(panel.send("screenshot " + q(os.path.abspath(args[0]))), "screenshot")
     elif cmd == "raw" and len(args) >= 1:
         panel.send("raw " + "".join(args))
     elif cmd == "split" and len(args) == 3:

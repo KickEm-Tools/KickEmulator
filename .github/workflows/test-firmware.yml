@@ -30,7 +30,7 @@ on:
         type: string
         default: fast
       runner:
-        description: "runs-on label (default: macos-14 for fast, ubuntu-24.04-arm for vm; fast also runs on ubuntu-24.04 / ubuntu-24.04-arm)"
+        description: "runs-on label (default: macos-15 for fast, ubuntu-24.04-arm for vm; fast also runs on macos-14, macos-26, ubuntu-24.04 / ubuntu-24.04-arm)"
         type: string
         default: ""
       checks:
@@ -60,8 +60,8 @@ on:
 
 jobs:
   test:
-    name: ${{ inputs.mode }} ${{ inputs.checks }} (${{ inputs.runner != '' && inputs.runner || (inputs.mode == 'vm' && 'ubuntu-24.04-arm' || 'macos-14') }})
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (inputs.mode == 'vm' && 'ubuntu-24.04-arm' || 'macos-14') }}
+    name: ${{ inputs.mode }} ${{ inputs.checks }} (${{ inputs.runner != '' && inputs.runner || (inputs.mode == 'vm' && 'ubuntu-24.04-arm' || 'macos-15') }})
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (inputs.mode == 'vm' && 'ubuntu-24.04-arm' || 'macos-15') }}
     timeout-minutes: ${{ inputs.mode == 'vm' && 100 || 50 }}
     permissions:
       contents: read
@@ -72,7 +72,7 @@ jobs:
       CHECKS: ${{ inputs.checks }}
       FW_REPO: ${{ inputs.firmware-repository != '' && inputs.firmware-repository || github.repository }}
       FW_REF: ${{ inputs.firmware-ref != '' && inputs.firmware-ref || github.sha }}
-      RUNNER_LABEL: ${{ inputs.runner != '' && inputs.runner || (inputs.mode == 'vm' && 'ubuntu-24.04-arm' || 'macos-14') }}
+      RUNNER_LABEL: ${{ inputs.runner != '' && inputs.runner || (inputs.mode == 'vm' && 'ubuntu-24.04-arm' || 'macos-15') }}
       EMU_REPO: ${{ inputs.emulator-repository }}
       EMU_REF: ${{ inputs.emulator-ref }}
       KICKEM_CACHE: ${{ github.workspace }}/.kickem-cache

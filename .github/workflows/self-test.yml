@@ -21,7 +21,7 @@ on:
         default: smoke
       fast-runner:
         description: "runner for fast mode"
-        default: macos-14
+        default: macos-15
 
 permissions:
   contents: read
@@ -37,7 +37,7 @@ jobs:
       firmware-repository: KickEm-Tools/0700-AAM
       firmware-ref: ${{ inputs.firmware-ref || 'main' }}
       mode: fast
-      runner: ${{ inputs.fast-runner || 'macos-14' }}
+      runner: ${{ inputs.fast-runner || 'macos-15' }}
       checks: ${{ inputs.checks || 'smoke' }}
       emulator-repository: ${{ github.repository }}
       emulator-ref: ${{ github.sha }}

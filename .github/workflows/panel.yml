@@ -41,7 +41,7 @@ jobs:
       matrix:
         include:
           - target: macos-arm64
-            runner: macos-14
+            runner: macos-15
           # Ubuntu 22.04 (glibc 2.35), so the binary also starts on older distributions.
           - target: linux-x86_64
             runner: ubuntu-22.04

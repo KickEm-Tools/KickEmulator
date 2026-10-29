@@ -6,7 +6,8 @@ emulated front panel, so you can test a change to the Kick app, the audio engine
 image without a unit.
 
 > **Status:** fast mode runs on macOS (Apple Silicon) and the smoke test passes over the wire.
-> The other checks, faithful mode (a VM) and CI come next; see [Status](#status). The plan is
+> Faithful mode (the fork's Linux arm64 build in a QEMU VM) runs and its smoke test passes too.
+> The other checks and CI come next; see [Status](#status). The plan is
 > `/goal-standalone` on the firmware work branch `rbdone/goal-simulator-controls`
 > (`.claude/commands/goal-standalone.md`).
 
@@ -54,7 +55,7 @@ Both modes use the same panel and the same checks.
 | Runs | The fork's `Kick` app, built for the desktop (macOS, Linux) from the fork's source and connected to the panel over a pty | The fork's Linux arm64 `KT_Kick` build in a QEMU arm64 VM, with the panel on the VM's serial port |
 | For | Quick edits and rebuilds, a debugger, scripted checks | The device's Linux code paths and services; CI on firmware pull requests |
 | Needs in the firmware | It builds on the desktop, has a working serial port, and has a few generic, opt-in extension points (`KICK_SERIAL_DEVICE`, `KICK_TEST_CONTROL`, `KICK_AUDIO_PROBE`, ...) | A working serial port |
-| State | works on macOS; Linux desktop not tried | phase 6, not started |
+| State | works on macOS; Linux desktop not tried | works on macOS (Apple Silicon, hvf; TCG too); Linux hosts not tried |
 
 ## What each mode cannot tell you
 
@@ -67,6 +68,41 @@ Both modes use the same panel and the same checks.
   driver, or the control-surface microcontroller's own behaviour.
 
 `kickem run` and every check print this at the start.
+
+## Faithful mode (`--mode vm`)
+
+```sh
+brew install qemu                                             # once; Docker Desktop is needed too
+./kickem run --mode vm --ref integration/standalone           # Ctrl-C stops the VM and the panel
+checks/smoke --mode vm --ref integration/standalone
+```
+
+The first run builds `KT_Kick-linux-arm64` from the ref in a Debian 12 arm64 container, downloads
+the stock Debian 12 arm64 cloud image and provisions it once with cloud-init (into
+`~/.cache/kickem/vm`, never into a repository). Every run then boots a fresh overlay of that
+image in QEMU (`virt`, `-accel hvf` on Apple Silicon), deploys the artifact, the Starter Kit and
+the fork's own `ktkick.service` / `kt_kick.sh` / Weston files to the unit's paths, attaches the
+panel to the guest's UART (`/dev/ttyAMA0`, on a pty here), and starts `ktkick.service`.
+`KICK_HARDWARE` is left unset, so the Linux code for Ethernet, Wi-Fi, the clock and the backlight
+runs for real. Screen touches and screenshots go through QMP. Details, the VM's hardware and what
+ran for real: [`modes/vm/README.md`](modes/vm/README.md).
+
+**How long it takes** (Apple M4 Max, measured by `checks/smoke --mode vm` on 2026-10-29, without
+the time spent waiting for another emulator's lock):
+
+| Step | hvf | TCG on the same Mac (emulation speed) |
+|---|---|---|
+| Provision the image (once) | 95-112 s | |
+| Boot, QEMU start to SSH | 12.3 s | 19.5 s |
+| Deploy | 1.1 s | 15.3 s |
+| `ktkick.service` to LIVE (includes `kt_kick.sh`'s 15 s sleep) | 16.1 s | 22.4 s |
+| `kickem run` to LIVE, artifact built | 30.4 s | 59.2 s |
+| Whole smoke test, artifact built | about 51 s | about 97 s |
+
+On an x86 Linux runner (TCG) expect roughly 2-4 times the TCG column; that is an estimate, not
+a measurement (`modes/vm/README.md`, Timing). The fork's CI artifact (built on Ubuntu 24.04,
+glibc 2.39) does not start in the Debian 12 guest, so faithful mode builds its own; see
+`modes/vm/README.md`.
 
 ## Usage
 
@@ -135,7 +171,7 @@ placeholder server `https://example.com/your-git-server`.
 | 4 | This repository: licence, layout, the firmware fetch, protocol targets from the fetched ref, `protocol_roundtrip`, the Starter Kit, `kickem fetch` | done |
 | 5a | The panel as its own program on the wire (pty, tcp, serial, throttle); `kickem run --mode fast`; the panel control channel and `kickem_ctl`; `checks/smoke` | done: smoke passes against `integration/standalone` |
 | 5b | Ports of `sim_transport`, `sim_modes`, `sim_pads`, `sim_sampler_looper`, `sim_overlays`; the serial fault test | not started |
-| 6 | Faithful mode: QEMU arm64 VM with the fork's `KT_Kick-linux-arm64`, panel on the VM's serial port | not started |
+| 6 | Faithful mode: QEMU arm64 VM with the fork's `KT_Kick-linux-arm64`, panel on the VM's serial port | done: `kickem run --mode vm`, `checks/smoke --mode vm` passes (hvf and TCG) against `integration/standalone` |
 | 7 | Reusable CI workflow for forks (`test-firmware.yml`), panel release builds | not started |
 
 ## Layout
@@ -147,7 +183,7 @@ placeholder server `https://example.com/your-git-server`.
 | `cmake/` | `KickemFirmware.cmake`: fetches the firmware by URL and ref, and exposes the protocol targets |
 | `tools/protocol_roundtrip/` | Encodes and decodes packets with the fetched ref's `CPktMgr`, as the app's serial reader does |
 | `modes/fast/` | How fast mode builds and runs a fork (it lives in `kickem`) |
-| `modes/vm/` | Faithful mode (plan) |
+| `modes/vm/` | Faithful mode: `kickem_vm.py` (image, provisioning, boot, deploy, QMP), `artifact.sh`, `guest/`, `run.sh` |
 | `checks/` | `smoke`, `lib/kickem_ctl`, `lib/wav_measure.py`, and the in-tree checks still to port |
 | `content/StarterKit/` | The Starter Kit: synthesised samples and a demo project, CC0 |
 | `kickem` | The launcher |

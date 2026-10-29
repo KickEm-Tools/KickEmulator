@@ -114,5 +114,6 @@ namespace sim
         CPktMgr                               decoder;
         std::chrono::steady_clock::time_point lastTry{}, connectedAt{}, rxFree{};
         int                                   tries{ 0 };
+        std::atomic<int>                      framesSinceOpen{ 0 };
     };
 } // namespace sim

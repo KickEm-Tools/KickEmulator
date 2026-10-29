@@ -1,0 +1,145 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Robustness of the firmware's control-surface link (/goal-serial phase 5): through the panel,
+# inject a bad CRC, a frame split across two reads, two frames in one read, garbage before and
+# between frames, an empty-payload frame, and close + reopen the port. For each: the app must
+# reject the bad input or recover, never crash, take the good frames around it, and a normal key
+# pressed afterwards must still work (its LED packet comes back over the wire).
+#
+#   checks/serial_faults [--firmware URL|PATH] [--ref REF] [--no-build] [--no-fetch] [OUTDIR]
+#
+# Default OUTDIR: checks/out/serial_faults. About 1 minute after the build. Evidence: kick.log,
+# panel.log (SimSerial: tx raw ... is every injected byte), results.txt.
+#
+# Witnesses: each case sends PAD releases for distinct pads ([pad, 0, 0, 0]: harmless, nothing is
+# held) as frames around the fault, and the app logs every request it accepts as
+# " Data[0] : <pad> Cmd : 0 type : 3". The frames are built here (CRC-8, polynomial 0x31, initial
+# 0xFF, docs/DEVELOPMENT.md 8.2 in the firmware) and sent with the panel's "raw" / "split"
+# commands, so exactly these bytes reach the port in the stated number of writes. A pty delivers
+# one write as one read, and two writes 150 ms apart as two.
+#
+# Close + reopen: the panel runs on pty:<run>/ttyKick, a symlink the app opens as
+# KICK_SERIAL_DEVICE. "close" closes the pseudo-terminal (the app's end sees a hang-up), "reopen"
+# makes a new one behind the same link. Recovery means the app opens the port again, the panel
+# sees the handshake (SimSerial: LIVE a second time) and keys work again.
+#
+# Needs in the firmware: feature/serialport. The expectations are what the reader should do;
+# against a firmware without fix/serial-robustness several fail, and the results say which.
+set -u
+NAME=serial_faults
+. "$(dirname "$0")/lib/common.sh"
+parse_args "$@"
+banner
+R="$OUT/results.txt"
+: > "$R"
+FAILS=0
+res() { printf '%-5s %-28s %s\n' "$1" "$2" "$3" | tee -a "$R"; [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
+
+# Frames as hex: frame TYPE CMD DATA... [badcrc] -> 'M' 'T' type 0 cmd size data crc '\n'.
+frame() { python3 -c '
+import sys
+a = sys.argv[1:]
+bad = a[-1] == "badcrc"
+if bad: a = a[:-1]
+t, c, data = int(a[0]), int(a[1]), [int(v) & 255 for v in a[2:]]
+body = bytes([0x4D, 0x54, t, 0, c, len(data) + 1] + data)
+crc = 0xFF
+for b in body:
+    crc ^= b
+    for _ in range(8):
+        crc = ((crc << 1) ^ 0x31) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+if bad: crc ^= 0xFF
+print((body + bytes([crc, 0x0A])).hex())' "$@"; }
+padrel() { frame 3 0 "$1" 0 0 0; }   # PAD EN_PAD_STATE [pad, released, 0, 0]
+
+mark() { "$CTL" echo "MARK $1" >/dev/null; }
+seg() { awk -v a="TestControl: echo MARK $1" -v b="TestControl: echo MARK $2" 'index($0, a) == 1 { f = 1; next } index($0, b) == 1 { f = 0 } f' "$KLOG"; }
+segp() { awk -v a="PanelControl: echo MARK $1" -v b="PanelControl: echo MARK $2" 'index($0, a) == 1 { f = 1; next } index($0, b) == 1 { f = 0 } f' "$PLOG"; }
+got() { seg "$1" "$2" | grep -q "^ Data\[0\] : $3 Cmd : 0 type : 3$"; }   # got FROM TO PAD
+
+BANK=A
+key_works() {   # a real panel key over the wire; its bank LED must come back. Sets K=yes|no.
+    if [ "$BANK" = A ]; then BANK=B; ID=1; else BANK=A; ID=0; fi   # BtnLedSequence: BANK_A 0, BANK_B 1
+    mark "key-$1"
+    "$CTL" press "$BANK" >/dev/null 2>&1
+    sleep 0.8
+    mark "keyend-$1"
+    if segp "key-$1" "keyend-$1" | grep -q "^SimSurface: LED cmd=0 data=$ID,1"; then K=yes; else K=no; fi
+}
+
+case_done() {   # case_done NAME PASS_CONDITION_TEXT DETAIL: alive, then a key
+    if ! alive; then res FAIL "$1" "the app died"; return; fi
+    key_works "$1"
+    if [ "$2" = yes ] && [ "$K" = yes ]; then res PASS "$1" "$3; a key afterwards works"
+    elif [ "$2" = yes ]; then res FAIL "$1" "$3; but a key afterwards got no LED back"
+    else res FAIL "$1" "$3${K:+; key afterwards: $K}"; fi
+}
+
+trap stop_emulator EXIT
+trap 'exit 1' INT TERM
+KICK_AUDIO_INPUT=silence start_emulator --transport "pty:$RUN/ttyKick"
+"$CTL" press PUSH >/dev/null
+wait_loaded 'Project: loaded .*/Starter Kit' 2 || { echo "FAIL  Starter Kit did not load"; exit 1; }
+echo "   link: $(sed -n 's/^SimSerial: listening on //p' "$PLOG" | head -1) -> $(readlink "$RUN/ttyKick")"
+key_works baseline
+[ "$K" = yes ] && res PASS baseline "BANK key LED comes back before any fault" || res FAIL baseline "no LED for a BANK key even before the faults"
+
+#### 1. Bad CRC, then a good frame in the same read ##############################################
+mark crc; "$CTL" raw "$(frame 3 0 1 0 0 0 badcrc)$(padrel 2)" >/dev/null; sleep 0.5; mark crc-end
+B=no; got crc crc-end 1 || B=yes; G=no; got crc crc-end 2 && G=yes
+[ "$B" = yes ] && [ "$G" = yes ] && OK=yes || OK=no
+case_done "bad CRC" "$OK" "bad frame rejected: $B; the good frame after it taken: $G"
+
+#### 2. A frame split across two reads, with the next frame in the second read ###################
+A=$(padrel 3); Bf=$(padrel 4)
+mark split; "$CTL" split 150 "$(printf '%s' "$A" | cut -c1-14)" "$(printf '%s' "$A" | cut -c15-)$Bf" >/dev/null; sleep 0.5; mark split-end
+G3=no; got split split-end 3 && G3=yes; G4=no; got split split-end 4 && G4=yes
+[ "$G3" = yes ] && [ "$G4" = yes ] && OK=yes || OK=no
+case_done "split frame" "$OK" "the split frame taken: $G3; the frame after it taken: $G4"
+
+#### 3. Two frames in one read ######################################################################
+mark two; "$CTL" raw "$(padrel 5)$(padrel 6)" >/dev/null; sleep 0.5; mark two-end
+G5=no; got two two-end 5 && G5=yes; G6=no; got two two-end 6 && G6=yes
+[ "$G5" = yes ] && [ "$G6" = yes ] && OK=yes || OK=no
+case_done "two frames, one read" "$OK" "first taken: $G5; second taken: $G6"
+
+#### 4. Garbage between frames, and garbage before a frame ########################################
+JUNK=00ff13374a554e4b4d0a
+mark junk; "$CTL" raw "$(padrel 7)$JUNK$(padrel 8)" >/dev/null; sleep 0.5; mark junk-end
+G7=no; got junk junk-end 7 && G7=yes; G8=no; got junk junk-end 8 && G8=yes
+[ "$G7" = yes ] && [ "$G8" = yes ] && OK=yes || OK=no
+case_done "garbage between frames" "$OK" "frame before the garbage taken: $G7; frame after it taken: $G8"
+mark junk2; "$CTL" raw "$JUNK$(padrel 9)" >/dev/null; sleep 0.5; mark junk2-end
+G9=no; got junk2 junk2-end 9 && G9=yes
+case_done "garbage before a frame" "$G9" "the frame after the garbage taken: $G9"
+
+#### 5. An empty-payload frame, then good frames ####################################################
+mark empty; "$CTL" raw "$(frame 3 0)$(padrel 10)" >/dev/null; sleep 0.5
+"$CTL" raw "$(padrel 11)" >/dev/null; sleep 0.5; mark empty-end
+G10=no; got empty empty-end 10 && G10=yes; G11=no; got empty empty-end 11 && G11=yes
+[ "$G10" = yes ] && [ "$G11" = yes ] && OK=yes || OK=no
+case_done "empty payload" "$OK" "the frame after it in the same read taken: $G10; the next read's frame taken: $G11"
+
+#### 6. Close and reopen the port ####################################################################
+LIVE0=$(grep -c '^SimSerial: LIVE' "$PLOG")
+mark close; "$CTL" close >/dev/null; sleep 3
+"$CTL" reopen >/dev/null; mark reopened
+i=0
+until [ "$(grep -c '^SimSerial: LIVE' "$PLOG")" -gt "$LIVE0" ]; do i=$((i + 1)); [ "$i" -ge 60 ] && break; sleep 0.25; done
+mark close-end
+echo "      the app after the hang-up:"
+seg close close-end | grep -v '^AudioProbe\|^TestControl' | sed 's/^/        /' | head -8
+echo "      the panel after reopening:"
+segp reopened close-end | grep -v '^SimSurface\|^PanelControl' | grep -v 'SimSerial: [tr]x \(LED\|PAD\|SLIDER\)' | sed 's/^/        /' | head -8
+if [ "$(grep -c '^SimSerial: LIVE' "$PLOG")" -gt "$LIVE0" ]; then RE=yes; else RE=no; fi
+case_done "close and reopen" "$RE" "the app reconnected (handshake LIVE again within 15 s): $RE"
+
+alive && res PASS "still running" "Kick pid $KPID" || res FAIL "still running" "Kick exited"
+stop_emulator
+trap - EXIT
+echo ""
+echo "evidence: $OUT"
+if [ "$FAILS" -eq 0 ]; then echo "SERIAL_FAULTS OK"; exit 0; fi
+echo "SERIAL_FAULTS FAILED: $FAILS case(s)"
+exit 1

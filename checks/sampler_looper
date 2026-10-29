@@ -1,0 +1,210 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# SAMPLER records, SAMPLE EDIT trims, the take is assigned to a pad and plays, and the LOOPER
+# records, loops in time and overdubs, over the wire. Port of the in-tree simulator's
+# sim_sampler_looper.sh (work-branch docs/DEVELOPMENT.md 4.6).
+#
+#   checks/sampler_looper [--firmware URL|PATH] [--ref REF] [--no-build] [--no-fetch] [OUTDIR]
+#
+# Default OUTDIR: checks/out/sampler_looper. Works on the build copy of "Demo 01" (restored
+# fresh): creates a sequence, a drum program and a track, records "New Sample.wav" beside the
+# project and saves it, then reloads it in a second session. About 2 minutes after the build.
+# Needs python3 with numpy.
+#
+# The in-tree script only printed measurements; the PASS / FAIL lines here assert the results
+# recorded for it on 2026-10-27 (DEVELOPMENT.md 4.6), with tolerances of one 480-sample engine
+# block or 0.2 dB:
+#   - the 1 kHz test tone (-12 dBFS) recorded with Max Length 2 s is 96000 frames, peak -12.00,
+#     RMS -15.01 dBFS: the input, exactly;
+#   - the preview and Pad 1 each play 2.000 s, with silence before;
+#   - Discard with START = 24000 leaves 72000 frames (1.500 s), which Pad 1 plays after reload;
+#   - the looper repeats with a period of 384000 samples (8.000 s, 4 bars at 120 BPM), successive
+#     periods sample-identical; overdubbing adds pulses to the loop.
+#
+# Needs in the firmware: feature/desktop-seams (test input, probe, test control), the release
+# build's AudIO_juce Recorder / SampleRecorder / Looper, and fix/audio-object-ids (without it the
+# sampler is never processed: silent takes).
+set -u
+NAME=sampler_looper
+. "$(dirname "$0")/lib/common.sh"
+parse_args "$@"
+banner
+rm -f "$OUT"/*.png "$OUT"/*.wav "$OUT"/*.log "$OUT/times.txt"
+T="$OUT/times.txt"
+: > "$T"
+note() { echo "$1 $(at)" >> "$T"; }
+
+trap stop_emulator EXIT
+trap 'exit 1' INT TERM
+
+#### Session 1: 1 kHz tone on the input ####################################################
+PROBE="$OUT/tone-probe.wav"
+KICK_AUDIO_INPUT=tone start_emulator
+DEMOS="$(kbuild)/demos"
+"$CTL" tap 283 150 >/dev/null                      # Projects: touch "Demo 01" (second tile)
+wait_loaded 'Project: loaded .*/Demo 01' 2 || { echo "FAIL  Demo 01 did not load"; exit 1; }
+"$CTL" tap 76 108 >/dev/null; "$CTL" tap 993 108 >/dev/null; sleep 1     # MAIN: Sequence tab, "+"
+"$CTL" click Program >/dev/null; "$CTL" tap 993 108 >/dev/null; sleep 1  # Program tab, "+" -> CREATE PROGRAM
+"$CTL" click Drum >/dev/null; "$CTL" click Apply >/dev/null; sleep 1
+"$CTL" click Track >/dev/null; "$CTL" tap 993 108 >/dev/null; sleep 1    # Track tab, "+"
+"$CTL" tap 33 222 >/dev/null; sleep 1                                    # the track's program button -> Select Program
+"$CTL" click "Program 01" >/dev/null; "$CTL" click Apply >/dev/null; sleep 1
+
+"$CTL" press SAMPLER >/dev/null; sleep 1.5
+"$CTL" turn P1 -18 >/dev/null; sleep 0.3           # Max Length 20 s -> 2 s (P1 = seconds)
+"$CTL" click recordButton >/dev/null; sleep 3.5    # records, stops by itself at 2 s
+"$CTL" shot "$OUT/1-sampler-recorded.png" >/dev/null
+note preview; "$CTL" click Play >/dev/null; sleep 3  # preview the take
+"$CTL" click Save >/dev/null; sleep 0.8            # KEEP OR DISCARD: Program 01, pad A01
+"$CTL" shot "$OUT/2-save-dialog.png" >/dev/null
+"$CTL" click Apply >/dev/null; sleep 1.5
+cp "$DEMOS/New Sample.wav" "$OUT/recorded.wav" 2>/dev/null || echo "FAIL  no New Sample.wav was written"
+
+"$CTL" press MAIN >/dev/null; sleep 2.5
+note pad; "$CTL" press "Pad 1" >/dev/null; sleep 3
+
+"$CTL" press "SAMPLE EDIT" >/dev/null; sleep 1.5
+"$CTL" click Chop >/dev/null; sleep 0.5
+"$CTL" turn P4 24 >/dev/null; sleep 0.5            # START + 24 x 1000 samples
+"$CTL" shot "$OUT/3-trim-start.png" >/dev/null
+"$CTL" click Tune >/dev/null; sleep 0.5
+"$CTL" click Process >/dev/null; sleep 1           # Select Function
+"$CTL" click Discard >/dev/null; sleep 0.8         # PROCESS SLICE: discard outside START..END
+"$CTL" click Apply >/dev/null; sleep 2.5
+"$CTL" shot "$OUT/4-trimmed.png" >/dev/null
+cp "$DEMOS/New Sample.wav" "$OUT/trimmed.wav" 2>/dev/null
+"$CTL" press SAVE >/dev/null; sleep 1.5            # SHIFT + BROWSE: save the project
+alive && A1=0 || A1=1
+stop_emulator
+mv "$OUT/kick.log" "$OUT/tone-kick.log"; mv "$OUT/panel.log" "$OUT/tone-panel.log"
+cp "$T" "$OUT/times-tone.txt"; : > "$T"
+
+#### Session 2: pulse train on the input, the reloaded project ##############################
+PROBE="$OUT/pulse-probe.wav"
+FRESH="" KICK_AUDIO_INPUT=pulse:700 start_emulator
+"$CTL" tap 283 150 >/dev/null
+wait_loaded 'Project: loaded .*/Demo 01' 2 || { echo "FAIL  Demo 01 did not load in session 2"; exit 1; }
+note pad2; "$CTL" press "Pad 1" >/dev/null; sleep 2.5   # the reloaded program plays the trimmed file
+"$CTL" press LOOP >/dev/null; sleep 1.5                 # SHIFT + SAMPLER; LENGTH 4 bars
+note rec; "$CTL" press RECORD >/dev/null; sleep 26      # one pass, then it plays
+"$CTL" shot "$OUT/5-looper-playing.png" >/dev/null
+note od; "$CTL" press OVERDUB >/dev/null; sleep 8.5     # OVERDUB for about one pass
+note pl; "$CTL" press PLAY >/dev/null; sleep 17         # PLAY: punch out, keep looping
+"$CTL" shot "$OUT/6-looper-overdubbed.png" >/dev/null
+"$CTL" press STOP >/dev/null; sleep 1
+alive && A2=0 || A2=1
+stop_emulator
+mv "$OUT/kick.log" "$OUT/pulse-kick.log"; mv "$OUT/panel.log" "$OUT/pulse-panel.log"
+cp "$T" "$OUT/times-pulse.txt"
+trap - EXIT
+
+#### Measurements and checks ###############################################################
+python3 - "$OUT" "$CHECKS/lib/wav_measure.py" "$A1" "$A2" <<'EOF'
+import os, sys
+import numpy as np
+out, wm_path, a1, a2 = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+ns = {}
+exec(compile(open(wm_path).read().replace('\nmain()\n', '\n'), 'wav_measure', 'exec'), ns)
+read_wav, db = ns['read_wav'], ns['db']
+fails = []
+def check(ok, what):
+    print(('PASS  ' if ok else 'FAIL  ') + what)
+    if not ok: fails.append(what)
+def times(name):
+    return {l.split()[0]: float(l.split()[1]) for l in open(os.path.join(out, name))}
+def span(x, sr, a, b, thr_db=-40):
+    """First and last sample above thr_db in [a, b] seconds, as seconds; (None, None) if none."""
+    seg = np.max(np.abs(x[int(a * sr):int(b * sr)]), axis=1)
+    nz = np.nonzero(seg > 10 ** (thr_db / 20))[0]
+    return (None, None) if not len(nz) else (a + nz[0] / sr, a + nz[-1] / sr)
+def peak(x, sr, a, b):
+    s = x[int(a * sr):int(b * sr)]
+    return db(np.max(np.abs(s))) if len(s) else -120.0
+
+check(a1 == '0' and a2 == '0', 'Kick still running at the end of both sessions')
+
+print('== recorded take')
+if os.path.exists(out + '/recorded.wav'):
+    x, sr = read_wav(out + '/recorded.wav')
+    pk, rms = db(np.max(np.abs(x))), db(np.sqrt(np.mean(x ** 2)))
+    print(f'      {len(x)} frames = {len(x) / sr:.4f} s at {sr} Hz, peak {pk:.2f} dBFS, rms {rms:.2f} dBFS')
+    check(abs(len(x) - 96000) <= 480 and abs(pk + 12.0) < 0.2 and abs(rms + 15.01) < 0.2,
+          'the take is the input: 96000 frames (2.000 s) of the -12 dBFS tone, RMS -15.01 dBFS')
+else:
+    check(False, 'the take was saved (New Sample.wav)')
+
+x, sr = read_wav(out + '/tone-probe.wav')
+t = times('times-tone.txt')
+for name, label in (('preview', 'the preview'), ('pad', 'Pad 1')):
+    a = t[name]
+    s, e = span(x, sr, a, a + 3)
+    before = peak(x, sr, a - 0.5, a)
+    d = (e - s) if s is not None else 0
+    print(f'      {label}: sound from {s and s - a:.3f} s to {e and e - a:.3f} s after the click ({d:.3f} s); 0.5 s before: {before:.1f} dBFS')
+    check(abs(d - 2.0) < 0.02 and before < -60, f'{label} plays the 2.000 s take, with silence before')
+
+print('== trimmed take')
+if os.path.exists(out + '/trimmed.wav'):
+    y, sr2 = read_wav(out + '/trimmed.wav')
+    print(f'      {len(y)} frames = {len(y) / sr2:.4f} s')
+    check(abs(len(y) - 72000) <= 480, 'Discard with START = 24000 leaves 72000 frames (1.500 s)')
+else:
+    check(False, 'the trimmed take was written')
+
+x, sr = read_wav(out + '/pulse-probe.wav')
+t = times('times-pulse.txt')
+a = t['pad2']
+# The input is a pulse train now, but nothing monitors it: only the pad sounds here.
+s, e = span(x, sr, a, a + 2.5)
+d = (e - s) if s is not None else 0
+print(f'      Pad 1 after reloading: {d:.3f} s of sound')
+check(abs(d - 1.5) < 0.02, 'after reloading the project, Pad 1 plays the trimmed 1.500 s take')
+
+print('== looper')
+P = 384000                                                   # 4 bars at 120 BPM, 48 kHz
+mono = x.mean(axis=1)
+def period_after(a, n_periods=2):
+    """Best period near 8 s, by cross-correlating the audio after `a` with itself."""
+    i = int(a * sr)
+    ref = mono[i:i + P]
+    best, lag = -1, 0
+    for L in range(P - 2400, P + 2401, 48):
+        seg = mono[i + L:i + L + P]
+        if len(seg) < P: break
+        c = float(np.dot(ref, seg)) / (np.linalg.norm(ref) * np.linalg.norm(seg) + 1e-12)
+        if c > best: best, lag = c, L
+    # Refine to the sample.
+    for L in range(lag - 48, lag + 49):
+        seg = mono[i + L:i + L + P]
+        c = float(np.dot(ref, seg)) / (np.linalg.norm(ref) * np.linalg.norm(seg) + 1e-12)
+        if c > best: best, lag = c, L
+    return lag, best
+lag, corr = period_after(t['rec'] + 9.0)                     # well inside playback, after the first pass
+print(f'      playback period {lag} samples = {lag / sr:.4f} s (correlation {corr:.4f})')
+check(abs(lag - P) <= 480 and corr > 0.99, 'the loop repeats every 384000 samples (8.000 s)')
+i = int((t['rec'] + 9.0) * sr)
+diff = np.max(np.abs(mono[i:i + P] - mono[i + lag:i + lag + P]))
+print(f'      two successive periods differ by at most {db(diff):.1f} dBFS')
+check(diff < 1e-4, 'successive periods are sample-identical')
+def pulses(a, b):
+    seg = np.max(np.abs(x[int(a * sr):int(b * sr)]), axis=1)
+    above = np.nonzero(seg > 10 ** (-40 / 20))[0]
+    on, last = [], -10 ** 9
+    for k in above:
+        if k - last > int(0.02 * sr): on.append(k)
+        last = k
+    return len(on)
+n_before = pulses(t['rec'] + 9.0, t['rec'] + 17.0)
+n_after = pulses(t['pl'] + 1.0, t['pl'] + 9.0)
+print(f'      pulses per 8 s pass: {n_before} before OVERDUB, {n_after} after')
+check(n_after > n_before, 'OVERDUB added a second, offset pulse set to the loop')
+lag2, corr2 = period_after(t['pl'] + 1.0)
+check(abs(lag2 - P) <= 480 and corr2 > 0.99, f'after PLAY (punch out) it keeps looping in time ({lag2 / sr:.4f} s)')
+
+print(f'\nSAMPLER_LOOPER FAILED: {len(fails)} check(s)' if fails else '\nSAMPLER_LOOPER OK')
+sys.exit(1 if fails else 0)
+EOF
+R=$?
+echo "evidence: $OUT"
+exit $R

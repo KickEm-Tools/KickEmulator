@@ -46,15 +46,17 @@ banner() {
     echo "   Ethernet / CV / update screens); timing and CPU load are this computer's, not the unit's."
 }
 
-# start_emulator [kickem run options...]: a fresh run (demos, templates, prefs restored) with the
-# probe at $PROBE, panel tracing on, under the machine-wide lock. Extra environment for the app
-# (KICK_AUDIO_INPUT, KICK_LOG_NOTES) is taken from the caller's environment.
+# start_emulator [kickem run options...]: a fresh run (demos, templates, prefs restored; FRESH=""
+# keeps what an earlier run saved) with the probe at $PROBE, panel tracing on, under the
+# machine-wide lock. Extra environment for the app (KICK_AUDIO_INPUT, KICK_LOG_NOTES) is taken
+# from the caller's environment.
+FRESH=--fresh
 start_emulator() {
     rm -rf "$RUN"
     rm -f "$PROBE"
     PROBE_OFFSET=""
     # shellcheck disable=SC2086
-    KICK_SIM_LOG_SURFACE=1 "$ROOT/kickem" run $RUN_ARGS --fresh --detach --probe "$PROBE" --out "$RUN" "$@" \
+    KICK_SIM_LOG_SURFACE=1 "$ROOT/kickem" run $RUN_ARGS $FRESH --detach --probe "$PROBE" --out "$RUN" "$@" \
         > "$OUT/kickem.log" 2>&1
     STATUS=$?
     if [ "$STATUS" -ne 0 ]; then

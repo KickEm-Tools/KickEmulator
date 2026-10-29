@@ -16,6 +16,10 @@ Panel (acked as "PanelControl: ok <n>" in the panel log):
     repeat MS N NAME         press a panel control N times, MS ms apart (timed in the panel)
     panelshot OUT.png        render the panel
     link                     the link's state and frame counters
+    raw HEX                  fault injection: these bytes, as they are, in one write
+    split MS HEX1 HEX2       fault injection: HEX1, a pause of MS ms, HEX2 (two reads)
+    close / reopen           fault injection: close the panel's transport (the app sees a
+                             hang-up) / open it again (pty:<link>: the link names the new pty)
 Screen (acked as "TestControl: ok <n>" in the app log; needs feature/desktop-seams):
     tap X Y                  touch pixel (X,Y) of the 1024x600 screen (delivered to the touched
                              component directly; works with the screen locked)
@@ -180,6 +184,12 @@ def main(argv):
         out(panel.send("repeat %d %d %s" % (ms, n, q(" ".join(args[2:]))), timeout=TIMEOUT + ms * n / 1000.0 + 1), "repeat")
     elif cmd == "panelshot" and len(args) == 1:
         out(panel.send("shot " + q(os.path.abspath(args[0]))), "shot")
+    elif cmd == "raw" and len(args) >= 1:
+        panel.send("raw " + "".join(args))
+    elif cmd == "split" and len(args) == 3:
+        panel.send("split %s %s %s" % tuple(args), timeout=TIMEOUT + int(args[0]) / 1000.0)
+    elif cmd in ("close", "reopen") and not args:
+        panel.send(cmd)
     elif cmd == "link":
         out(panel.send("link"), "link")
     elif cmd in ("tap", "touch", "shot") and st.get("mode") == "vm":

@@ -1,0 +1,183 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The app's full-screen popups (loading spinner, dialogs, nested dialogs) and notification
+# bubbles must appear inside the app's own 1024x600 window, as children of it, never as separate
+# desktop windows at the top-left of the computer's display. Panel keys must still work while a
+# dialog is modal, as the hardware keys do on the unit. A touch on a list row selects that row.
+# Port of the in-tree simulator's sim_overlays.sh (work-branch docs/DEVELOPMENT.md 4.1).
+#
+#   checks/overlays [--firmware URL|PATH] [--ref REF] [--no-build] [--no-fetch] [OUTDIR]
+#
+# Default OUTDIR: checks/out/overlays. Exit status 0 when every check passes. About 45 s after
+# the build.
+#
+# Needs in the firmware: feature/desktop-seams (ui::overlayRoot(), list rows hit-tested in their
+# own coordinates, the test-control module and its "touch" command), feature/timing-correct (TC
+# dialog), feature/key-handlers.
+#
+# Ported differences:
+# - "Inside the screen" is now "a child of the main window, within its 1024x600": the panel is
+#   another process, so there is no simulated screen to be inside; `windows` (TestControl)
+#   lists the overlays on the main window and any other desktop window.
+# - The panel key under a modal dialog is pressed over the wire (it was clicked in-process).
+# - List rows: lists take touches through a mouse listener on their canvas, which only JUCE's
+#   own dispatch reaches. `touch X Y` hands the touch to the window's ComponentPeer, as a click
+#   or a finger is; it needs the Kick window to be the topmost one at that point (the module
+#   floats the window above the others for the touch) and reports SKIP when that is impossible
+#   (screen locked). The selected row is read from the app's own rendering of the list (the
+#   highlighted band, checks/lib/row_highlight.py); the in-tree check read a "SimTable: ...
+#   touched row" log line, which the firmware no longer has.
+set -u
+NAME=overlays
+. "$(dirname "$0")/lib/common.sh"
+parse_args "$@"
+banner
+rm -f "$OUT"/*.png "$OUT"/windows-*.txt
+FAILS=0
+pass() { echo "PASS  $*"; }
+fail() { echo "FAIL  $*"; FAILS=$((FAILS + 1)); }
+
+# kickem_ctl windows lines: KIND<TAB>TYPE<TAB>screen X Y W H<TAB>display X Y W H.
+# check_overlays WHAT TYPE: one or more TYPE overlays on the main window, each within its
+# 1024x600, and no other desktop window.
+check_overlays() {
+    W=$("$CTL" windows) || { fail "$1: windows command failed"; return; }
+    printf '%s\n' "$W" > "$OUT/windows-$(printf '%s' "$1" | tr ' /' '__').txt"
+    printf '%s\n' "$W" | awk -F'\t' -v what="$1" -v type="$2" '
+        $1 == "desktop" { desk = desk " " $2 }
+        $1 == "overlay" && index($2, type) { n++; split($3, b, " "); ob[n] = $3; bx[n] = b[2]; by[n] = b[3]; bw[n] = b[4]; bh[n] = b[5] }
+        END {
+            if (desk != "") { print "FAIL  " what ": separate desktop window(s):" desk; exit 1 }
+            if (n == 0)     { print "FAIL  " what ": no " type " overlay on the main window"; exit 1 }
+            for (i = 1; i <= n; i++)
+                if (bx[i] < 0 || by[i] < 0 || bx[i] + bw[i] > 1024 || by[i] + bh[i] > 600) {
+                    print "FAIL  " what ": " type " at " ob[i] " is outside the 1024x600 window"; exit 1 }
+            print "PASS  " what ": " n " " type " overlay(s) on the main window, within 1024x600 (" ob[1] ")"
+        }' && return
+    FAILS=$((FAILS + 1))
+}
+
+check_none() {   # check_none WHAT: no overlay on the window and no extra desktop window
+    W=$("$CTL" windows) || { fail "$1: windows command failed"; return; }
+    if printf '%s\n' "$W" | grep -q '^overlay\|^desktop'; then
+        fail "$1: still showing: $(printf '%s\n' "$W" | grep '^overlay\|^desktop' | cut -f1,2 | tr '\n\t' '  ')"
+    else
+        pass "$1"
+    fi
+}
+
+check_in_window() {   # every titled component NAME lies within the main window's 1024x600
+    L=$("$CTL" list "$1")
+    if [ -n "$L" ] && printf '%s\n' "$L" | awk -F'\t' -v n="$1" '$2 == n { split($3, b, " "); if (b[1] < 0 || b[2] < 0 || b[1] + b[3] > 1024 || b[2] + b[4] > 600) bad = 1; c++ } END { exit !(c > 0 && !bad) }'; then
+        pass "'$1' is drawn inside the main window ($(printf '%s\n' "$L" | head -1 | cut -f3-4 | tr '\t' ' '))"
+    else
+        fail "'$1' not inside the main window: $L"
+    fi
+}
+
+trap stop_emulator EXIT
+trap 'exit 1' INT TERM
+KICK_AUDIO_INPUT=silence start_emulator
+pass "launched, handshake over the wire, pid $KPID"
+
+#### 1. Loading spinner (PUSH loads Starter Kit; loading runs on a thread, the UI stays live) ####
+"$CTL" press PUSH >/dev/null || fail "PUSH not delivered"
+check_overlays "loading spinner" fsPopup
+i=0
+until grep -q '^Project: loaded' "$KLOG"; do
+    i=$((i + 1)); [ "$i" -ge 60 ] && { fail "project did not load"; exit 1; }
+    sleep 0.5
+done
+# The spinner closes 200 ms after the engine reports the project loaded (kick_RecentProject_Utils.cpp).
+i=0
+while "$CTL" windows | grep -q '^overlay'; do
+    i=$((i + 1)); [ "$i" -ge 40 ] && break
+    sleep 0.25
+done
+echo "      (spinner closed $((i * 250)) ms after the load was logged)"
+check_none "spinner gone after the load"
+sleep 2   # keys are ignored until the project has settled
+
+#### 2. A dialog (TC opens TIMING CORRECT) ######################################################
+"$CTL" press TC >/dev/null || fail "TC not delivered"
+sleep 0.8
+check_overlays "TIMING CORRECT dialog" dialogDisplayer
+check_in_window Apply
+"$CTL" shot "$OUT/dialog.png" >/dev/null
+
+# A panel key pressed while the dialog is modal reaches the app, as the hardware key would.
+START=$(( $(wc -l < "$KLOG") + 1 ))
+if "$CTL" press TC >/dev/null 2>"$OUT/press.err"; then
+    sleep 0.3
+    if tail -n +"$START" "$KLOG" | grep -q 'Data\[0\] From DCL:34 '; then pass "panel key pressed under a modal dialog reaches the app (over the wire)"
+    else fail "panel key under the dialog: no packet reached the app"; fi
+else
+    fail "panel key under the dialog: $(cat "$OUT/press.err")"
+fi
+"$CTL" click Cancel >/dev/null || fail "Cancel not clickable"
+sleep 0.5
+check_none "dialog closed by Cancel"
+
+#### 3. A nested dialog (PROGRAMS opens PLAYHEAD CONTROL MENU, PUSH on PROGRAM opens PROGRAM) ###
+"$CTL" click PROGRAMS >/dev/null || fail "PROGRAMS not clickable"
+sleep 0.8
+check_overlays "PLAYHEAD CONTROL MENU dialog" dialogDisplayer
+"$CTL" tap 600 400 >/dev/null || fail "tap on PROGRAM failed" # focuses the PROGRAM list box
+"$CTL" press PUSH >/dev/null || fail "PUSH not delivered"
+sleep 0.8
+N=$("$CTL" windows | grep -c '^overlay')
+[ "$N" -eq 2 ] && pass "nested PROGRAM dialog opened over the first" || fail "expected 2 stacked dialogs, saw $N"
+check_overlays "nested dialogs" dialogDisplayer
+"$CTL" shot "$OUT/nested.png" >/dev/null
+"$CTL" click Cancel >/dev/null; sleep 0.4
+"$CTL" click Cancel >/dev/null; sleep 0.4
+check_none "both dialogs closed"
+
+#### 4. A notification bubble (ON/OFF = SHIFT + TC toggles timing correct) ######################
+"$CTL" press ON/OFF >/dev/null || fail "ON/OFF not delivered"
+sleep 0.3
+check_overlays "notification bubble" bubbleNotification
+"$CTL" shot "$OUT/bubble.png" >/dev/null
+sleep 2.5
+check_none "bubble gone after its timeout"
+"$CTL" press ON/OFF >/dev/null # back off
+sleep 2.5
+
+#### 5. List rows (BROWSE: the Location list, then the file list of Demos) ######################
+"$CTL" press BROWSE >/dev/null || fail "BROWSE not delivered"
+sleep 1.5
+"$CTL" shot "$OUT/list-0.png" >/dev/null
+# sel SHOT LIST: the highlighted row of the Location list (loc) or the file list (files), read
+# from the app's own rendering (checks/lib/row_highlight.py).
+sel() {
+    case "$2" in
+        loc) python3 -I "$CHECKS/lib/row_highlight.py" "$1" 230 335 218 53 3 ;;
+        files) python3 -I "$CHECKS/lib/row_highlight.py" "$1" 380 1000 218 53 5 ;;
+    esac | sed -n 's/^selected //p'
+}
+L0=$(sel "$OUT/list-0.png" loc)
+if "$CTL" touch 83 323 >/dev/null 2>"$OUT/touch.err"; then   # Location row 2: Demos
+    sleep 1
+    "$CTL" shot "$OUT/list-1-demos.png" >/dev/null
+    L1=$(sel "$OUT/list-1-demos.png" loc); F1=$(sel "$OUT/list-1-demos.png" files)
+    if [ "$L0" = 0 ] && [ "$L1" = 2 ]; then pass "touch on Location row 2 selects it (Internal -> Demos; list-1-demos.png)"
+    else fail "Location list: expected row 0 -> 2 highlighted, saw '$L0' -> '$L1' (list-0.png, list-1-demos.png)"; fi
+    "$CTL" touch 460 428 >/dev/null 2>>"$OUT/touch.err" || fail "touch on the file list: $(cat "$OUT/touch.err")"
+    sleep 1
+    "$CTL" shot "$OUT/list-2-demo03.png" >/dev/null
+    F2=$(sel "$OUT/list-2-demo03.png" files)
+    if [ "$F1" != 4 ] && [ "$F2" = 4 ]; then pass "touch on file row 4 selects it (Demo 03; row '$F1' before; list-2-demo03.png)"
+    else fail "Demos file list: expected row 4 highlighted after the touch, saw '$F1' -> '$F2'"; fi
+else
+    echo "SKIP  list rows: no real touch possible ($(sed 's/^kickem_ctl: //' "$OUT/touch.err" | head -1))"
+fi
+
+alive && pass "Kick still running" || fail "Kick exited"
+stop_emulator
+trap - EXIT
+
+echo ""
+if [ "$FAILS" -eq 0 ]; then echo "OVERLAYS OK (logs and screenshots in $OUT)"; exit 0; fi
+echo "OVERLAYS FAILED: $FAILS check(s), see $OUT"
+exit 1

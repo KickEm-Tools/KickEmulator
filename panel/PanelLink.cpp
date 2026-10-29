@@ -69,7 +69,8 @@ namespace sim
             return false;
         logLine( juce::String( "SimSerial: " ) + transport->verb() + " " + transport->peer()
                  + ( transport->throttle() > 0 ? " (throttled to " + juce::String( transport->throttle() ) + " baud)" : juce::String() ) );
-        running = true;
+        running         = true;
+        framesSinceOpen = 0;
         setState( State::WaitConnect );
         reader = std::thread( [this] { readerLoop(); } );
         writer = std::thread( [this] { writerLoop(); } );
@@ -297,6 +298,7 @@ namespace sim
             return;
         }
         ++framesIn;
+        ++framesSinceOpen;
 
         // Throttle: the frame cannot have arrived sooner than the UART could carry it.
         if( const auto t = transport->wireTime( Frame.size() ); t.count() > 0 )
@@ -359,7 +361,7 @@ namespace sim
     void PanelLink::retryHandshake()
     {
         const auto state = linkState.load();
-        if( state == State::WaitConnect && framesIn > 0 && connectedAt == std::chrono::steady_clock::time_point{} )
+        if( state == State::WaitConnect && framesSinceOpen > 0 && connectedAt == std::chrono::steady_clock::time_point{} )
         {
             // The app talked first without the connect frame (it was already running when the
             // panel started): start from comm init anyway.

@@ -136,7 +136,8 @@ def main():
                 nfail = sum(1 for l in lines if l.startswith("FAIL"))
                 notes.append("%d PASS, %d FAIL" % (npass, nfail))
                 notes += [l[6:].strip() for l in lines if l.startswith("FAIL")][:5]
-                notes += [l.strip() for l in lines if l.startswith(("TIME", "      that is"))][:2]
+                notes += [l.strip() for l in lines if l.startswith(("NOTE", "INFO"))][:2]
+                notes += [l.strip() for l in lines if l.startswith(("TIME", "      that is", "      kickem run to LIVE"))][:2]
             st_path = os.path.join(ev, name, "run", "state.json")
             if os.path.exists(st_path):
                 try:

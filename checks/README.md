@@ -7,24 +7,41 @@ lock), prints `PASS` / `FAIL` lines, stops what it started, and leaves its evide
 (default `checks/out/<check>`, not committed). Each prints which mode ran and what that mode cannot
 tell you.
 
-| Check | What | State |
-|---|---|---|
-| `smoke` | Boot, handshake over the wire, PUSH loads the Starter Kit, pad colours arrive, silent; PLAY four bars, STOP: PLAY / STOP LED packets, every whole second of the four bars above -40 dBFS, nothing above 0 dBFS, silent after STOP, the app still running. Also prints the time from `kickem run` to sound | ported (`--mode fast`; `vm` in phase 6) |
-| `sim_transport.sh` | Transport keys, BAR:BEAT:TICK, gain staging, RECORD / OVERDUB, TAP TEMPO, metronome (work-branch DEVELOPMENT.md 4.7) | **not ported yet** (5b) |
-| `sim_modes.sh` | Every mode key and SHIFT function, mixers, NEXT SEQ (4.8) | **not ported yet** (5b) |
-| `sim_pads.sh` | Pads, FULL / HALF / 16 LEVELS, NOTE REPEAT, LATCH, ERASE + pad, encoders, slider (4.9) | **not ported yet** (5b) |
-| `sim_sampler_looper.sh` | Sampler record / preview / save / trim, looper record / loop / overdub (4.6) | **not ported yet** (5b) |
-| `sim_overlays.sh` | Popups, spinner and bubbles inside the screen, list-row touches (4.1) | **not ported yet** (5b) |
-| (new) `serial_faults` | `/goal-serial` phase 5: bad CRC, split frame, two frames in one read, garbage, close and reopen | **not written yet** (5b) |
+Each check takes the same arguments: `[--mode fast] [--firmware URL|PATH] [--ref REF] [--no-build]
+[--no-fetch] [OUTDIR]`. All of them are fast mode only so far (`--mode vm` exits 3, except `smoke`,
+which runs in the VM too). Run times are after the build, on an Apple Silicon Mac.
 
-The `sim_*.sh` scripts are the in-tree simulator's checks, copied unchanged from `Kick/tools/` on
-`rbdone/goal-simulator-controls` at `6b6024ce`. They still expect the `SIM_BUILD` app and do not
-run from here; they are the specification for their ports.
+| Check | What it proves | Run time | Needs in the fork (beyond `main` of 2026-10-29) |
+|---|---|---|---|
+| `smoke` | Boot and handshake over the wire; PUSH loads the Starter Kit; pad colours arrive; silent; PLAY four bars, STOP: PLAY / STOP LED packets, every whole second of the four bars above -40 dBFS, nothing above 0 dBFS, silent after STOP, the app alive. Prints the time from `kickem run` to sound | @SMOKE@ | `fix/ui-small` (#6: PUSH loads the selected demo) |
+| `transport` | PLAY / STOP / PLAY START and BAR:BEAT:TICK, the first note on tick 0, gain staging (Pad 1 at -13.3 dBFS, centred), RECORD and OVERDUB (hits replayed one loop later within 16 ms, replace vs add, Timing Correct snapping), TAP TEMPO (100 BPM, loop 9.6 s), the metronome (clicks every 0.600 s, 2 kHz accent on beat 1) | @TRANSPORT@ | `fix/engine-gain-staging` (#4), `feature/metronome` (#12), `feature/key-handlers` (#13) |
+| `modes` | Every function key and SHIFT function: the packet reaches the app, its LED comes back; P1-P4 on an empty project do not crash; TRACK MIX / PAD MIX levels heard; TRACK MUTE and PAD MUTE against the probe; NEXT SEQ; MASTER; TC moves Sequence 02's drums onto the grid; SAVE | @MODES@ | `fix/engine-gain-staging` (#4), `fix/ui-small` (#6), `feature/key-handlers` (#13) |
+| `pads` | Banks, FULL / HALF LEVEL, 16 LEVELS, NOTE REPEAT and LATCH timing, NOTES pitches, ERASE + pad, BACK, COPY / ERASE in GRID, focus with slider / + / - / jog, P1-P4 per screen, MENU | @PADS@ | `feature/pad-modifiers` (#14, with #13), `fix/engine-gain-staging` (#4) |
+| `sampler_looper` | SAMPLER records the input exactly (96000 frames of the -12 dBFS tone), preview and Pad 1 play it, SAMPLE EDIT's Discard trims it to 72000 frames, it reloads; the LOOPER loops every 384000 samples, periods sample-identical, OVERDUB adds | @SAMPLER@ | nothing |
+| `overlays` | Spinner, dialogs, nested dialogs and bubbles are overlays on the app's own window, within 1024x600, no other desktop window; a panel key reaches the app under a modal dialog; a touch on a list row selects it (read from the app's rendering) | @OVERLAYS@ | `feature/test-control-touch` (#18) for the list rows (`touch` needs the screen unlocked; it reports SKIP otherwise) |
+| `serial_faults` | `/goal-serial` phase 5. Bad CRC, a frame split across two reads, two frames in one read, garbage between and before frames, an empty payload, closing and reopening the port. For each: good frames around it taken, no crash, a real key afterwards gets its LED back; after the reopen the app reconnects (handshake LIVE again) | @FAULTS@ | `fix/serial-robustness` (#17) |
+
+The checks were ported from the in-tree simulator's `sim_*.sh` (`Kick/tools/` on
+`rbdone/goal-simulator-controls`), with their assertions and thresholds. Each script's header lists
+where it differs and why:
+- `transport` reads the record mode from the engine's `Record:` lines;
+- `modes` waits 2.5 s after muting every track, so a crash tail has ended;
+- `pads` prints, rather than requires, the drop of the energy above 6 kHz after ERASE + Pad 3;
+- `sampler_looper` asserts the results that were only printed before;
+- `overlays` checks "inside the app's window", not "inside the simulated screen", and reads the
+  touched list row from the rendering.
 
 ```sh
 checks/smoke --ref integration/standalone                 # KickEm-Tools/0700-AAM, that branch
-checks/smoke --firmware /path/to/your/0700-AAM --ref my-branch [--no-build] [OUTDIR]
+checks/transport --firmware /path/to/your/0700-AAM --ref my-branch [--no-build] [OUTDIR]
+for c in smoke transport modes pads sampler_looper overlays serial_faults; do checks/$c --ref integration/standalone --no-build; done
 ```
+
+**What fast mode cannot tell you**, for every check here: anything Linux-specific (systemd units,
+scripts, device nodes, the Wi-Fi / Ethernet / CV / update screens), or how the unit times things.
+Latency, CPU load and audio-callback timing are this computer's. The panel plays the
+microcontroller's side of the protocol, not its firmware. A pseudo-terminal delivers each write as
+one read, so `serial_faults` stages a split frame with two writes, where a UART splits anywhere.
 
 ## checks/lib
 
@@ -34,11 +51,17 @@ checks/smoke --firmware /path/to/your/0700-AAM --ref my-branch [--no-build] [OUT
     go to the panel's control channel and are acknowledged as `PanelControl: ok <n>` in the panel
     log. The panel sends real `CPktMgr` frames, so the app receives what a unit's microcontroller
     sends.
-  - Screen commands (`tap`, `click`, `clickat`, `list`, `shot`, `windows`, `status`) go to the
-    firmware's `KICK_TEST_CONTROL` file and are acknowledged as `TestControl: ok <n>` in the app
-    log. `shot OUT.png` also renders the panel to `OUT-panel.png`.
+  - Screen commands (`tap`, `touch`, `click`, `clickat`, `list`, `shot`, `windows`, `status`) go
+    to the firmware's `KICK_TEST_CONTROL` file and are acknowledged as `TestControl: ok <n>` in the
+    app log. `shot OUT.png` also renders the panel to `OUT-panel.png`. `tap` is delivered to the
+    touched component (works with the screen locked); `touch` is a real touch through the window,
+    which a list's mouse listener hears too.
+  - Fault injection (`raw HEX`, `split MS HEX1 HEX2`, `close`, `reopen`) goes to the panel's link.
   - `echo TEXT` writes a marker into both logs, so a check can cut either log at the same moment.
+- **`common.sh`**: what every check shares: arguments, `start_emulator` / `stop_emulator`
+  (`kickem run --detach --fresh --probe`), the probe clock, log markers.
 - **`wav_measure.py`**: peak, RMS, onsets and dominant frequency of the probe WAV (needs numpy).
+- **`row_highlight.py`**: which list row the app draws highlighted in a `shot` (standard library).
 
 ## Log names (the firmware's, since `feature/desktop-seams`)
 
@@ -52,14 +75,9 @@ checks/smoke --firmware /path/to/your/0700-AAM --ref my-branch [--no-build] [OUT
 | `SimSurface:` | unchanged, in the panel log (`KICK_SIM_LOG_SURFACE=1`) |
 | (none) | `SimSerial:` (panel log), `InputEvents:` / `Send Comm Live` (app log) |
 
-## What porting the rest means
+## Drift
 
-- Replace `sim_launch.sh` / `sim_quit.sh` with `kickem run --detach --fresh --out OUT/run` and
-  `kickem stop --out OUT/run`, and `sim_ctl.sh` with `kickem_ctl` (`KICKEM_RUN_DIR=OUT/run`).
-- Grep the app log for engine and screen lines, and the panel log for LED and pad packets
-  (`SimSurface:`); the markers from `kickem_ctl echo` are in both.
-- `TestControl` `tap` / `click` deliver to the touched component only, so a parent's mouse
-  listener (the `KickTableView` canvas) does not hear them: list-row selection by touch needs a
-  check of its own.
-- When a check fails because the fork's `main` lacks a fix still in review, say so and name the
-  fix branch; run it against that branch (or `integration/standalone`) to show the check is right.
+When a check fails because the fork's `main` lacks a fix still in review, the check is right and
+the fork is behind. The table above names the pull requests each check needs. On 2026-10-29 every
+check passed against `integration/standalone` (all open pull requests). Against `main` and
+against `main` + only those pull requests, see @DRIFT@.

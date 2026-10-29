@@ -169,6 +169,8 @@ if "$CTL" touch 83 323 >/dev/null 2>"$OUT/touch.err"; then   # Location row 2: D
     F2=$(sel "$OUT/list-2-demo03.png" files)
     if [ "$F1" != 4 ] && [ "$F2" = 4 ]; then pass "touch on file row 4 selects it (Demo 03; row '$F1' before; list-2-demo03.png)"
     else fail "Demos file list: expected row 4 highlighted after the touch, saw '$F1' -> '$F2'"; fi
+elif grep -q 'unknown command touch' "$OUT/touch.err"; then
+    fail "list rows: this firmware's test control has no 'touch' command (needs feature/test-control-touch, KickEm-Tools/0700-AAM #18)"
 else
     echo "SKIP  list rows: no real touch possible ($(sed 's/^kickem_ctl: //' "$OUT/touch.err" | head -1))"
 fi

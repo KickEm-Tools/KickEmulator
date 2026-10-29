@@ -5,7 +5,9 @@ firmware repository URL and a branch. It fetches that ref, builds it, and runs i
 emulated front panel, so you can test a change to the Kick app, the audio engine or the Linux
 image without a unit.
 
-> **Status:** fast mode runs on macOS (Apple Silicon) and the smoke test passes over the wire.
+> **Status:** fast mode runs on macOS (Apple Silicon), and all seven checks (smoke, transport,
+> modes, pads, sampler_looper, overlays, serial_faults) pass over the wire against
+> `integration/standalone`.
 > Faithful mode (the fork's Linux arm64 build in a QEMU VM) runs and its smoke test passes too.
 > The other checks and CI come next; see [Status](#status). The plan is
 > `/goal-standalone` on the firmware work branch `rbdone/goal-simulator-controls`
@@ -170,7 +172,7 @@ placeholder server `https://example.com/your-git-server`.
 |---|---|---|
 | 4 | This repository: licence, layout, the firmware fetch, protocol targets from the fetched ref, `protocol_roundtrip`, the Starter Kit, `kickem fetch` | done |
 | 5a | The panel as its own program on the wire (pty, tcp, serial, throttle); `kickem run --mode fast`; the panel control channel and `kickem_ctl`; `checks/smoke` | done: smoke passes against `integration/standalone` |
-| 5b | Ports of `sim_transport`, `sim_modes`, `sim_pads`, `sim_sampler_looper`, `sim_overlays`; the serial fault test | not started |
+| 5b | `checks/transport`, `modes`, `pads`, `sampler_looper`, `overlays` (ports of the in-tree `sim_*.sh`) and `serial_faults` (/goal-serial phase 5); panel fault injection (`raw`, `split`, `close`, `reopen`) | done: all pass against `integration/standalone` (2026-10-29); the fault test found the reader bugs fixed in KickEm-Tools/0700-AAM #17; drift against `main` in `checks/README.md` |
 | 6 | Faithful mode: QEMU arm64 VM with the fork's `KT_Kick-linux-arm64`, panel on the VM's serial port | done: `kickem run --mode vm`, `checks/smoke --mode vm` passes (hvf and TCG) against `integration/standalone` |
 | 7 | Reusable CI workflow for forks (`test-firmware.yml`), panel release builds | not started |
 
@@ -184,7 +186,7 @@ placeholder server `https://example.com/your-git-server`.
 | `tools/protocol_roundtrip/` | Encodes and decodes packets with the fetched ref's `CPktMgr`, as the app's serial reader does |
 | `modes/fast/` | How fast mode builds and runs a fork (it lives in `kickem`) |
 | `modes/vm/` | Faithful mode: `kickem_vm.py` (image, provisioning, boot, deploy, QMP), `artifact.sh`, `guest/`, `run.sh` |
-| `checks/` | `smoke`, `lib/kickem_ctl`, `lib/wav_measure.py`, and the in-tree checks still to port |
+| `checks/` | `smoke`, `transport`, `modes`, `pads`, `sampler_looper`, `overlays`, `serial_faults`; `lib/` (`kickem_ctl`, `common.sh`, `wav_measure.py`, `row_highlight.py`). See `checks/README.md` |
 | `content/StarterKit/` | The Starter Kit: synthesised samples and a demo project, CC0 |
 | `kickem` | The launcher |
 | `.github/workflows/` | Empty until phase 7 |

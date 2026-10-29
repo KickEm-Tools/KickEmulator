@@ -122,6 +122,9 @@ look, so SHIFT + pad and the other SHIFT-held behaviours do not trigger, as on a
 `PanelControl: ok <seq>` or `PanelControl: error <seq> <reason>`. `checks/lib/kickem_ctl` is the
 client. Commands: `press NAME`, `down NAME [VEL]`, `up NAME`, `hold NAME SECS [VEL]`,
 `turn P1..P4|JOG STEPS`, `slider 0..100`, `repeat MS N NAME`, `shot FILE.png [SCALE]`,
+`record START DIR [FPS [SCALE]]` / `record STOP` (the panel rendered as `shot` does, FPS times a
+second, into numbered PNGs and `frames.txt` with each frame's wall-clock time; 30 fps at about
+11 ms a frame on an M4 Max, written on background threads; `docs/make_demo_video.sh` uses it),
 `list [FILTER]`, `link`, `echo TEXT`, and for the embedded screen `screen` (state, frame rate,
 touch-to-frame latency), `screentouch X Y [X2 Y2 [MS]]` (a click or a drag on it, through the
 mouse's own path) and `screenshot FILE.png` (the last frame as received). Details in

@@ -225,7 +225,7 @@ def has_marker(path, marker):
 
 # The embedded screen in fast mode (--screen embedded): the firmware's opt-in screen mirror.
 SCREEN_MIRROR = ("the screen mirror (KICK_SCREEN_MIRROR), for --screen embedded",
-                 "Kick/modules/test_control", "KICK_SCREEN_MIRROR", "feature/screen-mirror (PR #23)")
+                 "Kick/modules/test_control", "KICK_SCREEN_MIRROR", "feature/screen-mirror, PR #23")
 
 
 def has_screen_mirror(src):
@@ -620,9 +620,9 @@ def cmd_run(a):
         # The screen: embedded in the panel through the firmware's mirror, or the app's window.
         screen, screen_sock = a.screen, None
         if screen == "embedded" and not has_screen_mirror(path):
-            say("--screen embedded: this ref lacks %s (%s in %s; KickEm-Tools/0700-AAM branch %s, not merged "
-                "into main yet: try --ref feature/screen-mirror, or merge it into your branch). Falling back to "
-                "--screen window: the Kick screen is the app's own window."
+            say("--screen embedded: this ref lacks %s (%s in %s; KickEm-Tools/0700-AAM %s, in its main since "
+                "2026-10-29: merge or rebase onto it). Falling back to --screen window: the Kick screen is the "
+                "app's own window."
                 % (SCREEN_MIRROR[0], SCREEN_MIRROR[2], SCREEN_MIRROR[1], SCREEN_MIRROR[3]))
             screen = "window"
         if screen == "embedded":

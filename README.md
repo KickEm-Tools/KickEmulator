@@ -13,10 +13,15 @@ image without a unit.
 > `/goal-standalone` on the firmware work branch `rbdone/goal-simulator-controls`
 > (`.claude/commands/goal-standalone.md`).
 
-![The panel with the live Kick screen embedded: the Starter Kit loaded and playing](docs/images/embedded-fast-playing.png)
+[![The emulator in fast mode with the Kick's screen embedded: the Projects screen, PUSH loads the Starter Kit, PLAY, pads hit while it plays, TRACK MIX with the Drums level moved, MAIN, STOP](docs/media/kickem-demo.gif)](docs/media/kickem-demo.mp4)
 
 *Fast mode, `--screen embedded` (the default): the fork's own `Kick` app, its screen inside the
-panel's bezel, playing the Starter Kit. Clicks and drags on the screen are touches.*
+panel's bezel, loading and playing the Starter Kit. With sound:
+[`docs/media/kickem-demo.mp4`](docs/media/kickem-demo.mp4) (33 s, H.264 + AAC; GitHub does not
+play a repository's videos inline, so the link opens its player). Both are made by
+[`docs/make_demo_video.sh`](docs/make_demo_video.sh): the panel renders its own frames
+(`kickem_ctl record`) and the sound is the app's master output (`--probe`), so no desktop is
+captured.*
 
 The firmware itself needs no emulator code. The only coupling is the control-surface serial
 protocol (`CPktMgr`, `ComProtocol/PktMgr`). The panel is a separate program that speaks the
@@ -31,7 +36,7 @@ Needs Xcode's command-line tools, CMake 3.22+, git and Python 3.8+.
 
 ```sh
 git clone https://github.com/KickEm-Tools/KickEmulator.git && cd KickEmulator
-./kickem run --ref feature/screen-mirror         # fetch, build, start the panel and Kick, connect them
+./kickem run                                     # fetch KickEm-Tools/0700-AAM main, build, start the panel and Kick
 ```
 
 One window opens: the panel, with the Kick's screen (the fork's own `Kick` app) inside it. On the
@@ -40,10 +45,10 @@ key). Click or drag on the screen as you would touch the unit's. Ctrl-C in the t
 `--screen window` gives the app its own window instead, as before. The first run downloads JUCE (about 170 MB) into
 `~/.cache/kickem/cpm` unless `CPM_SOURCE_CACHE` points at a cache that has it.
 
-`feature/screen-mirror` is `KickEm-Tools/0700-AAM` `main` plus the opt-in screen mirror that the
-embedded screen needs in fast mode (pull request #23, in review). Any other ref works as well; one
-without the mirror runs with the screen in its own window, and `kickem` says so (see
-[Pointing it at your fork](#pointing-it-at-your-fork)).
+The embedded screen needs the firmware's opt-in screen mirror (`KICK_SCREEN_MIRROR`), which is in
+`KickEm-Tools/0700-AAM` `main` (pull request #23). Any other ref works as well (`--ref BRANCH`,
+`--firmware URL`); one without the mirror runs with the screen in its own window, and `kickem`
+says so (see [Pointing it at your fork](#pointing-it-at-your-fork)).
 
 **How long it takes** (Apple Silicon, 16 cores, JUCE already in the CPM cache), measured by
 `checks/smoke` from a cold cache on 2026-10-28:
@@ -78,7 +83,7 @@ and QEMU's display window with `--display` in faithful mode (headless without it
 |---|---|---|
 | Embedded: where the screen comes from | The app itself, started with `KICK_SCREEN_MIRROR=<unix socket>`: its window then has no native window; JUCE paints it with the software renderer (as on the unit) and the app serves it over RFB ("VNC"), at most 30 frames a second, only what changed | QEMU's own VNC server on the VM's display (`-vnc unix:<socket>`); no firmware change |
 | Embedded: where a click goes | Over the socket to the app's window peer, which hands it to JUCE as a native window's mouse events: JUCE dispatches it as a touch | Over the socket to QEMU, which moves the VM's `usb-tablet` (absolute) and presses it; Weston and Xwayland deliver it to the app |
-| Embedded: what it needs in the firmware | `KICK_SCREEN_MIRROR` (`feature/screen-mirror`, PR #23); without it `kickem` falls back to window mode and says so | nothing |
+| Embedded: what it needs in the firmware | `KICK_SCREEN_MIRROR` (in `main` since PR #23); without it `kickem` falls back to window mode and says so | nothing |
 | Window | The app's own window (`touch` from the test-control module needs it topmost) | QEMU's window with `--display`, else headless |
 
 The embedded screen uses no operating-system input: it works with the Mac locked or the panel
@@ -91,6 +96,10 @@ dialog, and that the dialog shows inside the embedded screen.
 | Window mode, fast: the panel and the app's own window | Embedded, a dialog opened by a click on the screen |
 |---|---|
 | ![Window mode: the panel and the separate Kick window](docs/images/window-mode.png) | ![A dialog shown inside the embedded screen](docs/images/embedded-dialog.png) |
+
+![The panel with the live Kick screen embedded: the Starter Kit loaded and playing](docs/images/embedded-fast-playing.png)
+
+*Fast mode, embedded: the Starter Kit playing. Clicks and drags on the screen are touches.*
 
 ![Faithful mode: the VM's screen embedded in the panel](docs/images/embedded-vm.png)
 
@@ -205,8 +214,8 @@ process runs without the lock. A lock whose owner has died is reclaimed; otherwi
 checks/smoke --firmware ~/src/0700-AAM --ref <your-branch>
 ```
 
-Fast mode needs these changes in the fork. Until they are merged into `KickEm-Tools/0700-AAM`
-`main`, base your branch on `integration/standalone` or merge them yourself:
+Fast mode needs these changes in the fork. All of them are merged into `KickEm-Tools/0700-AAM`
+`main` (2026-10-29); a fork that branched off before them needs them merged or rebased in:
 
 | Needed for | Branch (pull request) | Without it |
 |---|---|---|
@@ -217,9 +226,9 @@ Fast mode needs these changes in the fork. Until they are merged into `KickEm-To
 | SHIFT functions from a control surface | `fix/shift-state` (#16) | SHIFT + key behaviours do nothing (as on a unit today) |
 | the screen inside the panel (`--screen embedded`, fast mode) | `feature/screen-mirror` (#23) | the screen is the app's own window, with a message |
 
-`kickem` checks the fetched tree for these before building and names what is missing. Against
-`KickEm-Tools/0700-AAM` `main` (`27194180`, equal to upstream) today it says the first two are
-missing; with `--ignore-missing` the configure fails, because CPM tries to clone `AudIO` from the
+`kickem` checks the fetched tree for these before building and names what is missing. Against a
+tree without them (upstream, `27194180`, which `KickEm-Tools/0700-AAM` `main` equalled before these
+merges) it says the first two are missing; with `--ignore-missing` the configure fails, because CPM tries to clone `AudIO` from the
 placeholder server `https://example.com/your-git-server`.
 
 ## Status
@@ -270,7 +279,8 @@ satisfied.
 - **No logo.** The emulator draws no manufacturer logo or other trademarks: the area above the
   screen, where the unit carries its logo, is left blank. The model name under the screen stays.
 - **Screenshots** in `docs/images/` are the panel's and the app's own renders (`kickem_ctl
-  panelshot`, `shot`, `screenshot`), not desktop captures.
+  panelshot`, `shot`, `screenshot`), not desktop captures. So is the video in `docs/media/`
+  (`kickem_ctl record`, `docs/make_demo_video.sh`); its sound is the Starter Kit.
 - Never committed: firmware build outputs, VM disk images, Buildroot downloads, NXP firmware or
   driver blobs (see `.gitignore`).
 

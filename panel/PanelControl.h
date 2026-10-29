@@ -30,16 +30,24 @@
 //   split MS HEX1 HEX2  fault injection: write HEX1, wait MS ms, write HEX2 (two reads)
 //   close / reopen      fault injection: close the transport (the app sees a hang-up) / open
 //                       it again (with pty:<link>, the link then names the new pty)
+//   record START DIR [FPS [SCALE]]  render the panel FPS times a second (default 30, scale 1 =
+//                       1240x1250), in-process as shot does, into DIR/frame-NNNNNN.png, with
+//                       DIR/frames.txt: one line per frame, "<file> <wall clock, ms since 1970>",
+//                       and one per command run meanwhile, "# <wall clock ms> <seq> <command>"
+//   record STOP         stop, wait for the frames still being written, log
+//                       "PanelControl: record stopped frames=.. dropped=.. fps=.. render_ms=.."
 //   echo TEXT           log "PanelControl: echo TEXT" (a marker for scripts)
 //
 // Nothing here needs a window server: controls are driven directly, so it works while the
-// Mac's screen is locked or the window is covered.
+// Mac's screen is locked or the window is covered; record needs no Screen Recording permission.
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 namespace sim
 {
+    class FrameRecorder;
+
     class PanelControl : private juce::Timer
     {
     public:
@@ -63,5 +71,6 @@ namespace sim
         juce::String                  partial;
         juce::StringArray             queue;
         bool                          busy{ false };
+        std::unique_ptr<FrameRecorder> recorder;
     };
 } // namespace sim

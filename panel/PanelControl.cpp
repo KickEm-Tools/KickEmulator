@@ -2,6 +2,7 @@
 #include "PanelControl.h"
 #include "kick_Simulator.h"
 
+#include <atomic>
 #include <typeinfo>
 
 namespace sim
@@ -27,6 +28,98 @@ namespace sim
         }
     } // namespace
 
+    //==============================================================================================
+    /// record START: renders the panel at a steady rate, in-process (the same snapshot as shot),
+    /// and writes each frame as a PNG on a few background threads. Each frame's wall-clock time
+    /// goes into frames.txt, so an encoder can lay the frames out at their real times and line
+    /// them up with the audio probe's WAV.
+    class FrameRecorder : private juce::Timer
+    {
+    public:
+        FrameRecorder( juce::Component& Panel, const juce::File& Dir, double Fps, float Scale )
+            : panel( Panel ), dir( Dir ), period( 1000.0 / Fps ), scale( Scale )
+        {
+            dir.getChildFile( "frames.txt" ).deleteFile();
+            index = std::make_unique<juce::FileOutputStream>( dir.getChildFile( "frames.txt" ) );
+            start  = juce::Time::getMillisecondCounterHiRes();
+            epoch0 = (double)juce::Time::currentTimeMillis();
+            due    = start;
+            startTimer( 2 );
+        }
+
+        ~FrameRecorder() override
+        {
+            stopTimer();
+            pool.removeAllJobs( false, 10000 );
+        }
+
+        bool opened() const { return index != nullptr && index->openedOk(); }
+        /// A panel command, into frames.txt as "# <wall clock ms> <command>", so the frames can
+        /// be lined up with what the command caused (PLAY: the first sound).
+        void note( const juce::String& Line )
+        {
+            *index << "# " << juce::String( epoch0 + ( juce::Time::getMillisecondCounterHiRes() - start ), 1 ) << " " << Line << "\n";
+        }
+        double epochAtStart() const { return epoch0; }
+        void   finish()
+        {
+            stopTimer();
+            stopped = juce::Time::getMillisecondCounterHiRes();
+        }
+        bool         done() const { return pending.load() == 0; }
+        juce::String stats() const
+        {
+            index->flush();
+            const double secs = ( stopped - start ) / 1000.0;
+            return "frames=" + juce::String( frames ) + " dropped=" + juce::String( dropped ) + " late=" + juce::String( late ) + " seconds="
+                   + juce::String( secs, 2 ) + " fps=" + juce::String( secs > 0 ? frames / secs : 0.0, 2 ) + " render_ms="
+                   + juce::String( frames > 0 ? renderMs / frames : 0.0, 1 ) + " failed=" + juce::String( failed.load() ) + " dir=" + dir.getFullPathName();
+        }
+
+    private:
+        void timerCallback() override
+        {
+            const auto now = juce::Time::getMillisecondCounterHiRes();
+            if( now < due )
+                return;
+            if( now - due > period )
+            {
+                // The message thread was busy for more than a frame: skip the missed slots rather
+                // than bunch frames up (frames.txt has the real times either way).
+                late += (int)( ( now - due ) / period );
+                due = now;
+            }
+            due += period;
+            if( pending.load() >= 12 )
+            {
+                ++dropped; // the PNG writers fell behind
+                return;
+            }
+            auto       img  = panel.createComponentSnapshot( panel.getLocalBounds(), true, scale );
+            const auto took = juce::Time::getMillisecondCounterHiRes() - now;
+            renderMs += took;
+            const auto file = dir.getChildFile( juce::String::formatted( "frame-%06d.png", ++frames ) );
+            *index << file.getFileName() << " " << juce::String( epoch0 + ( now - start ), 1 ) << "\n";
+            ++pending;
+            pool.addJob( [this, img, file] {
+                juce::FileOutputStream os( file );
+                if( !os.openedOk() || !juce::PNGImageFormat().writeImageToStream( img, os ) )
+                    ++failed;
+                --pending;
+            } );
+        }
+
+        juce::Component&                        panel;
+        const juce::File                        dir;
+        const double                            period;
+        const float                             scale;
+        std::unique_ptr<juce::FileOutputStream> index;
+        juce::ThreadPool                        pool{ 4 };
+        double                                  start{ 0 }, epoch0{ 0 }, due{ 0 }, stopped{ 0 }, renderMs{ 0 };
+        int                                     frames{ 0 }, dropped{ 0 }, late{ 0 };
+        std::atomic<int>                        pending{ 0 }, failed{ 0 };
+    };
+
     PanelControl::PanelControl( juce::Component& Panel, const juce::File& File, std::function<juce::String()> LinkInfo )
         : panel( Panel ), file( File ), linkInfo( std::move( LinkInfo ) )
     {
@@ -37,7 +130,11 @@ namespace sim
         startTimer( 20 );
     }
 
-    PanelControl::~PanelControl() { stopTimer(); }
+    PanelControl::~PanelControl()
+    {
+        stopTimer();
+        recorder.reset();
+    }
 
     void PanelControl::timerCallback()
     {
@@ -101,6 +198,8 @@ namespace sim
             t = t.unquoted();
         if( tok.size() < 2 )
             return log( "error ? malformed line: " + Line );
+        if( recorder != nullptr )
+            recorder->note( Line );
         const auto seq = tok[0];
         const auto cmd = tok[1];
         tok.removeRange( 0, 2 );
@@ -268,6 +367,54 @@ namespace sim
                 return fail( "cannot write " + out.getFullPathName() );
             log( "shot " + out.getFullPathName() + " " + juce::String( img.getWidth() ) + "x" + juce::String( img.getHeight() ) );
             return ok();
+        }
+
+        if( cmd == "record" )
+        {
+            // record START DIR [FPS [SCALE]] / record STOP
+            if( tok.size() >= 2 && tok[0] == "START" )
+            {
+                if( recorder != nullptr )
+                    return fail( "already recording" );
+                const auto dir   = juce::File::getCurrentWorkingDirectory().getChildFile( tok[1] );
+                const auto fps   = tok.size() > 2 ? juce::jlimit( 1.0, 60.0, tok[2].getDoubleValue() ) : 30.0;
+                const auto scale = tok.size() > 3 ? juce::jlimit( 0.25f, 2.0f, tok[3].getFloatValue() ) : 1.0f;
+                if( !dir.createDirectory() )
+                    return fail( "cannot create " + dir.getFullPathName() );
+                recorder = std::make_unique<FrameRecorder>( panel, dir, fps, scale );
+                if( !recorder->opened() )
+                {
+                    recorder.reset();
+                    return fail( "cannot write " + dir.getChildFile( "frames.txt" ).getFullPathName() );
+                }
+                log( "record started " + dir.getFullPathName() + " fps=" + juce::String( fps, 1 ) + " scale=" + juce::String( scale, 2 ) + " epoch_ms="
+                     + juce::String( recorder->epochAtStart(), 0 ) );
+                return ok();
+            }
+            if( tok.size() == 1 && tok[0] == "STOP" )
+            {
+                if( recorder == nullptr )
+                    return fail( "not recording" );
+                recorder->finish();
+                busy      = true;
+                auto wait = std::make_shared<std::function<void()>>();
+                *wait     = [this, ok, weak = std::weak_ptr<std::function<void()>>( wait )] {
+                    if( !recorder->done() )
+                    {
+                        if( auto next = weak.lock() )
+                            juce::Timer::callAfterDelay( 50, [next] { ( *next )(); } );
+                        return;
+                    }
+                    log( "record stopped " + recorder->stats() );
+                    recorder.reset();
+                    busy = false;
+                    ok();
+                };
+                // The lambda holds the only strong reference while waiting.
+                juce::Timer::callAfterDelay( 50, [wait] { ( *wait )(); } );
+                return;
+            }
+            return fail( "usage: record START DIR [FPS [SCALE]] | record STOP" );
         }
 
         if( cmd == "list" )

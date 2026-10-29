@@ -9,7 +9,8 @@ image without a unit.
 > modes, pads, sampler_looper, overlays, serial_faults) pass over the wire against
 > `integration/standalone`.
 > Faithful mode (the fork's Linux arm64 build in a QEMU VM) runs and its smoke test passes too.
-> The other checks and CI come next; see [Status](#status). The plan is
+> CI: a reusable workflow forks call with a few lines ([Add it to your fork's CI](#add-it-to-your-forks-ci)),
+> and downloadable panel builds ([Panel downloads](#panel-downloads)); see [Status](#status). The plan is
 > `/goal-standalone` on the firmware work branch `rbdone/goal-simulator-controls`
 > (`.claude/commands/goal-standalone.md`).
 
@@ -35,8 +36,9 @@ Ctrl-C in the terminal stops both. The first run downloads JUCE (about 170 MB) i
 `~/.cache/kickem/cpm` unless `CPM_SOURCE_CACHE` points at a cache that has it.
 
 `integration/standalone` is a scratch branch of `KickEm-Tools/0700-AAM` that merges every open
-pull request. `main` cannot run yet, because the changes fast mode needs are still in review (see
-[Pointing it at your fork](#pointing-it-at-your-fork)).
+pull request. Since 2026-10-29 `main` has what fast mode needs, and `checks/smoke` passes against
+it in CI (see [Pointing it at your fork](#pointing-it-at-your-fork) for the drift of the other
+checks).
 
 **How long it takes** (Apple Silicon, 16 cores, JUCE already in the CPM cache), measured by
 `checks/smoke` from a cold cache on 2026-10-28:
@@ -150,8 +152,9 @@ process runs without the lock. A lock whose owner has died is reclaimed; otherwi
 checks/smoke --firmware ~/src/0700-AAM --ref <your-branch>
 ```
 
-Fast mode needs these changes in the fork. Until they are merged into `KickEm-Tools/0700-AAM`
-`main`, base your branch on `integration/standalone` or merge them yourself:
+Fast mode needs these changes in the fork. All of them are in `KickEm-Tools/0700-AAM` `main`
+since 2026-10-29; a fork of the upstream release (`MusicTribeOpenSource/0700-AAM`) needs them
+merged, or its branch based on `KickEm-Tools/0700-AAM` `main`:
 
 | Needed for | Branch (pull request) | Without it |
 |---|---|---|
@@ -162,8 +165,7 @@ Fast mode needs these changes in the fork. Until they are merged into `KickEm-To
 | SHIFT functions from a control surface | `fix/shift-state` (#16) | SHIFT + key behaviours do nothing (as on a unit today) |
 
 `kickem` checks the fetched tree for these before building and names what is missing. Against
-`KickEm-Tools/0700-AAM` `main` (`27194180`, equal to upstream) today it says the first two are
-missing; with `--ignore-missing` the configure fails, because CPM tries to clone `AudIO` from the
+the upstream release (`27194180`) it says the first two are missing; with `--ignore-missing` the configure fails, because CPM tries to clone `AudIO` from the
 placeholder server `https://example.com/your-git-server`.
 
 ## Status
@@ -174,7 +176,7 @@ placeholder server `https://example.com/your-git-server`.
 | 5a | The panel as its own program on the wire (pty, tcp, serial, throttle); `kickem run --mode fast`; the panel control channel and `kickem_ctl`; `checks/smoke` | done: smoke passes against `integration/standalone` |
 | 5b | `checks/transport`, `modes`, `pads`, `sampler_looper`, `overlays` (ports of the in-tree `sim_*.sh`) and `serial_faults` (/goal-serial phase 5); panel fault injection (`raw`, `split`, `close`, `reopen`) | done: all pass against `integration/standalone` (2026-10-29); the fault test found the reader bugs fixed in KickEm-Tools/0700-AAM #17; drift against `main` in `checks/README.md` |
 | 6 | Faithful mode: QEMU arm64 VM with the fork's `KT_Kick-linux-arm64`, panel on the VM's serial port | done: `kickem run --mode vm`, `checks/smoke --mode vm` passes (hvf and TCG) against `integration/standalone` |
-| 7 | Reusable CI workflow for forks (`test-firmware.yml`), panel release builds | not started |
+| 7 | Reusable CI workflow for forks (`test-firmware.yml`), the emulator's own CI (`self-test.yml`), panel release builds (`panel.yml`) | done: fast smoke and faithful smoke pass in CI against `KickEm-Tools/0700-AAM` `main`; panel builds for macOS arm64, Linux x86_64 and arm64. Not yet tagged: `v1` and `panel-v0.1.0` wait for the go-ahead |
 
 ## Layout
 
@@ -189,7 +191,7 @@ placeholder server `https://example.com/your-git-server`.
 | `checks/` | `smoke`, `transport`, `modes`, `pads`, `sampler_looper`, `overlays`, `serial_faults`; `lib/` (`kickem_ctl`, `common.sh`, `wav_measure.py`, `row_highlight.py`). See `checks/README.md` |
 | `content/StarterKit/` | The Starter Kit: synthesised samples and a demo project, CC0 |
 | `kickem` | The launcher |
-| `.github/workflows/` | Empty until phase 7 |
+| `.github/workflows/`, `.github/ci/` | `test-firmware.yml` (the reusable workflow for forks), `self-test.yml` (this repository's CI), `panel.yml` (panel builds and releases); the scripts they run. See `.github/workflows/README.md` |
 
 ## Building the tools by hand
 

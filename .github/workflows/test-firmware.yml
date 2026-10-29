@@ -62,7 +62,7 @@ jobs:
   test:
     name: ${{ inputs.mode }} ${{ inputs.checks }} (${{ inputs.runner != '' && inputs.runner || (inputs.mode == 'vm' && 'ubuntu-24.04-arm' || 'macos-15') }})
     runs-on: ${{ inputs.runner != '' && inputs.runner || (inputs.mode == 'vm' && 'ubuntu-24.04-arm' || 'macos-15') }}
-    timeout-minutes: ${{ inputs.mode == 'vm' && 100 || 50 }}
+    timeout-minutes: ${{ inputs.mode == 'vm' && 150 || 50 }}
     permissions:
       contents: read
     outputs:
@@ -252,7 +252,7 @@ jobs:
 
       # Saved as soon as the build is done, so a failing check does not lose them.
       - name: Save the CPM cache
-        if: always() && steps.cpm.outputs.cache-hit != 'true' && (steps.build_fast.outcome == 'success' || steps.build_vm.outcome == 'success')
+        if: always() && inputs.mode == 'fast' && steps.cpm.outputs.cache-hit != 'true' && steps.build_fast.outcome == 'success'
         uses: actions/cache/save@v5
         with:
           path: .kickem-cache/cpm
@@ -277,7 +277,9 @@ jobs:
         shell: bash
         run: |
           t0=$(date +%s)
-          python emulator/modes/vm/kickem_vm.py provision 2>&1 | tee "$EVIDENCE/provision-output.txt"
+          # Under TCG (no KVM on hosted runners) cloud-init installing about 200 packages takes about
+          # half an hour, against 2 minutes with hvf: allow 70 minutes. The result is cached.
+          python emulator/modes/vm/kickem_vm.py provision --timeout 4200 2>&1 | tee "$EVIDENCE/provision-output.txt"
           echo "provision_s=$(( $(date +%s) - t0 ))" >> "$GITHUB_OUTPUT"
           echo "cached=${{ steps.vmcache.outputs.cache-hit == 'true' }}" >> "$GITHUB_OUTPUT"
           cp "$KICKEM_CACHE/vm/provision-serial.log" "$EVIDENCE/" 2>/dev/null || true
@@ -311,6 +313,14 @@ jobs:
             set -- --mode fast --firmware "$GITHUB_WORKSPACE/firmware" --ref kickem-ci --no-build
           fi
           emulator/.github/ci/run-checks.sh "$EVIDENCE" "$CHECKS" "$@"
+
+      # vm mode: JUCE lands in the host's CPM cache only when the panel is built, inside the check.
+      - name: Save the CPM cache (vm)
+        if: always() && inputs.mode == 'vm' && steps.cpm.outputs.cache-hit != 'true' && hashFiles('.kickem-cache/cpm/juce/**/CMakeLists.txt') != ''
+        uses: actions/cache/save@v5
+        with:
+          path: .kickem-cache/cpm
+          key: ${{ steps.cpm.outputs.cache-primary-key }}
 
       - name: Job summary
         if: always()

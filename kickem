@@ -702,7 +702,7 @@ def cmd_run_vm(a):
     preflight(path, a.ignore_missing)
     tarball = vm_artifact(a, path, commit, url)
     root = build_root(url, a.ref)
-    panel_build = os.path.join(root, "panel")
+    panel_build = panel_build_dir(root)
     log = os.path.join(root, "build.log")
     with file_lock(root + ".lock"):
         if not (a.no_build and os.path.exists(panel_app(panel_build))):

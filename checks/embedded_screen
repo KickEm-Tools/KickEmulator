@@ -14,7 +14,7 @@
 # Default OUTDIR: checks/out/embedded_screen. Exit status 0 when every check passes. About 40 s
 # after the build in fast mode, 90 s in faithful mode (hvf).
 #
-# Needs in the firmware: fast mode KICK_SCREEN_MIRROR (feature/screen-mirror) and the
+# Needs in the firmware: fast mode KICK_SCREEN_MIRROR (KickEm-Tools/0700-AAM main, PR #23) and the
 # test-control module (feature/desktop-seams); faithful mode nothing beyond what smoke needs.
 #
 # What it checks:

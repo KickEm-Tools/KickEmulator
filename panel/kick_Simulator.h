@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "ScreenView.h"
+
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <PktMgr/PktMgr.hpp>
 #include <contracts/dcl/dcl_contracts.h>
@@ -186,9 +188,10 @@ namespace sim
 
     //==============================================================================================
     /// The whole front panel at the proportions of the physical unit, in a fixed canvas of
-    /// canvasW x canvasH units. The Kick's screen is the app's own window (it runs in its own
-    /// process), so the display cut-out shows only the link's state. ScaledPanel below scales
-    /// the canvas to the window.
+    /// canvasW x canvasH units. ScaledPanel below scales the canvas to the window.
+    /// The display cut-out holds the Kick's screen when it is embedded (setEmbeddedScreen,
+    /// --screen embedded): a ScreenView scaled with the panel. In window mode the screen is the
+    /// app's own window (or the VM's display) and the cut-out shows only the link's state.
     class Simulator : public juce::Component
     {
     public:
@@ -202,6 +205,9 @@ namespace sim
         void handleFromApp( const CPktMgr::HWMsg_t& msg );
         /// Shown in the display cut-out, e.g. "LIVE  /dev/ttys012".
         void setLinkStatus( const juce::String& Text );
+        /// Embeds the Kick's screen in the display cut-out (--screen embedded).
+        void setEmbeddedScreen( std::unique_ptr<ScreenView> Screen );
+        ScreenView* getEmbeddedScreen() { return screenView.get(); }
 
         static constexpr int canvasW = 1240, canvasH = 1250;
 
@@ -232,6 +238,7 @@ namespace sim
         EndlessKnob  jog{ KnobLookAndFeel::Style::Jog, 4.f };
 
         juce::String linkStatus{ "no link" };
+        std::unique_ptr<ScreenView> screenView;
 
         // LED state per id as the app last set it: a key lights when its own LED or the LED of
         // its SHIFT function is on (HALF LEVEL on FULL LEVEL, LATCH on NOTE REPEAT).

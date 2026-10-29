@@ -7,11 +7,17 @@
 //
 //   kickem-panel [--transport pty|pty:<link>|tcp:<host>:<port>|serial:<dev>[@<baud>]]
 //                [--throttle [BAUD]] [--control FILE] [--quiet]
+//                [--screen window|embedded] [--screen-source unix:<path>|tcp:<host>:<port>]
 //
 //   --transport  default pty: prints "SimSerial: listening on /dev/ttysNNN"
 //   --throttle   pace the link at a UART's real throughput (default 230400 baud, as the unit)
 //   --control    the scripting channel (PanelControl.h); checks/lib/kickem_ctl writes to it
 //   --quiet      no SimSerial: tx / rx line per frame (handshake and errors are still logged)
+//   --screen     embedded: show the Kick's screen in the display cut-out, from the RFB server at
+//                --screen-source (the firmware's KICK_SCREEN_MIRROR socket in fast mode, QEMU's
+//                -vnc socket in faithful mode), and send clicks and drags on it back as
+//                touches (ScreenView.h). window (the default): the screen is the app's own window
+//                or the VM's display, and the cut-out shows the link's state.
 //
 // KICK_SIM_LOG_SURFACE=1 also logs every packet from the app as "SimSurface: <TYPE> cmd=<n>
 // data=<...>", the trace the in-tree simulator's checks read.
@@ -31,14 +37,19 @@ namespace
     class PanelWindow : public juce::DocumentWindow
     {
     public:
-        PanelWindow()
+        explicit PanelWindow( bool EmbeddedScreen )
             : juce::DocumentWindow( "KickEmulator panel", juce::Colours::black, juce::DocumentWindow::allButtons )
         {
             setUsingNativeTitleBar( true );
             setContentNonOwned( &content, true );
             setResizable( true, true );
             setResizeLimits( 310, 312, 2480, 2500 );
-            centreWithSize( 620, 625 );
+            // With the screen inside, big enough to read it: up to 90 % of the display's height.
+            int h = 625;
+            if( EmbeddedScreen )
+                if( auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay() )
+                    h = juce::jlimit( 625, 1100, (int)( d->userArea.getHeight() * 0.9 ) );
+            centreWithSize( h * sim::Simulator::canvasW / sim::Simulator::canvasH, h );
             setVisible( true );
         }
         void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
@@ -58,7 +69,7 @@ namespace
             juce::Logger::setCurrentLogger( &logger );
             auto args = juce::StringArray( getCommandLineParameterArray() );
 
-            juce::String spec = "pty", control;
+            juce::String spec = "pty", control, screenMode = "window", screenSource;
             int          throttle = 0;
             bool         quiet    = false;
             for( int i = 0; i < args.size(); ++i )
@@ -68,21 +79,30 @@ namespace
                 if( a == "--transport" ) spec = next();
                 else if( a == "--control" ) control = next();
                 else if( a == "--quiet" ) quiet = true;
+                else if( a == "--screen" ) screenMode = next();
+                else if( a == "--screen-source" ) screenSource = next();
                 else if( a == "--throttle" )
                     throttle = ( i + 1 < args.size() && args[i + 1].containsOnly( "0123456789" ) ) ? next().getIntValue() : 230400;
                 else if( a.startsWith( "-psn" ) || a.startsWith( "-NS" ) || a == "YES" ) continue; // macOS launch noise
                 else return fail( "unknown argument " + a + " (see the comment at the top of panel/Main.cpp)" );
             }
 
+            if( screenMode != "window" && screenMode != "embedded" )
+                return fail( "--screen window|embedded, not " + screenMode );
+            if( screenMode == "embedded" && screenSource.isEmpty() )
+                return fail( "--screen embedded needs --screen-source unix:<path>|tcp:<host>:<port>" );
             sim::logLine( "KickEmulator panel: protocol from " KICKEM_FIRMWARE_ORIGIN " = " KICKEM_FIRMWARE_COMMIT );
+            sim::logLine( "KickEmulator panel: screen " + screenMode + ( screenMode == "embedded" ? " from " + screenSource : juce::String( " (the app's own window)" ) ) );
             std::string error;
             auto        transport = kickem::makeTransport( spec.toStdString(), throttle, error );
             if( transport == nullptr )
                 return fail( "SimSerial: " + juce::String( error ) );
             link = std::make_unique<sim::PanelLink>( std::move( transport ), !quiet );
 
-            window = std::make_unique<PanelWindow>();
+            window = std::make_unique<PanelWindow>( screenMode == "embedded" );
             auto& panel = window->content.getPanel();
+            if( screenMode == "embedded" )
+                panel.setEmbeddedScreen( std::make_unique<sim::ScreenView>( screenSource ) );
             sim::setOutput( [this]( CPktMgr::HWMsg_t m ) {
                 if( link ) link->send( std::move( m ) );
             } );

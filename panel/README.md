@@ -4,8 +4,9 @@
 the keys with their LED captions and SHIFT functions, P1-P4 and the jog wheel as endless
 encoders, the slider and its LED ladder, and the MASTER / REC pots. It plays the control-surface
 microcontroller's side of the serial protocol: it sends what the microcontroller sends, and it
-shows the pad colours and key LEDs the app sends back. The Kick's screen is the app's own window,
-in its own process; the panel's display cut-out shows the link's state instead.
+shows the pad colours and key LEDs the app sends back. The Kick's screen is either embedded in the
+display cut-out (`--screen embedded`, below) or the app's own window (`--screen window`, the
+default when the panel is started by hand), in which case the cut-out shows the link's state.
 
 It links JUCE's GUI modules and, from the firmware ref under test, only the protocol:
 `ComProtocol/PktMgr` (`kickem::pktmgr`) and the control ids in
@@ -15,6 +16,7 @@ It links JUCE's GUI modules and, from the firmware ref under test, only the prot
 ```sh
 kickem-panel [--transport pty|pty:<link>|tcp:<host>:<port>|serial:<dev>[@<baud>]]
              [--throttle [BAUD]] [--control FILE] [--quiet]
+             [--screen window|embedded] [--screen-source unix:<path>|tcp:<host>:<port>]
 ```
 
 `./kickem run` builds and starts it; to build it alone:
@@ -32,6 +34,7 @@ cmake --build build --target kickem-panel     # build/panel/kickem-panel, a plai
 | `Main.cpp` | The program: arguments, window, logger (stdout), wiring of panel, link and control channel |
 | `PanelLink.{h,cpp}` | The microcontroller's side of the link: framing with the fetched `CPktMgr`, a reader and a writer thread, the handshake, `SimSerial:` logging |
 | `kick_Simulator.{h,cpp}` | Panel geometry (canvas units measured from a photo of the unit), drawing, SHIFT semantics, pad-colour, LED and slider-ladder decoding, and the packet each control sends |
+| `ScreenView.{h,cpp}` | The embedded screen: a small RFB client drawn in the display cut-out, and the mouse on it sent back as touches |
 | `PanelControl.{h,cpp}` | The scripting channel (`--control FILE`): the panel half of the in-tree simulator's `SimControl` |
 | `../transport/Transport.{h,cpp}` | pty, tcp and serial transports, and the throttle |
 
@@ -76,6 +79,33 @@ With `KICK_SIM_LOG_SURFACE=1` the panel also logs every packet it acts on as
 `SimSurface: <TYPE> cmd=<n> data=<...>` (the in-tree simulator's trace, which `checks/smoke`
 reads).
 
+## The embedded screen
+
+With `--screen embedded --screen-source <socket>` the display cut-out holds `ScreenView`, an RFB
+("VNC") client for the screen server at `<socket>`:
+
+- **fast mode:** the firmware's opt-in screen mirror. `kickem run` starts `Kick` with
+  `KICK_SCREEN_MIRROR=<socket>`: its main window then has no native window at all (a headless
+  JUCE peer), renders with JUCE's software renderer, as the unit does, at most 30 times a second,
+  and serves the screen there (firmware `docs/DEVELOPMENT.md` 9.5, `Kick/modules/test_control`);
+- **faithful mode:** QEMU's own VNC server on the VM's display (`-vnc unix:<socket>`); no QEMU
+  window is shown.
+
+The view is part of the panel's canvas (730 x 428 canvas units for 1024 x 600 pixels), so it
+scales with the window as everything else does. A click is a touch: mouse down, drags while the
+button is held, mouse up become RFB pointer events at screen pixels (`ScreenView::toScreen`). In
+fast mode the app hands them to its peer's `handleMouseEvent`, so JUCE dispatches them exactly as
+it dispatches a native window's mouse or the unit's touch panel (list rows, drags, sliders,
+popups); in faithful mode QEMU turns them into absolute events on the VM's usb-tablet, through
+Weston and Xwayland. Nothing here uses the operating system's windows: it works with the Mac
+locked and the panel covered, and the panel's control channel can click the screen too
+(`screentouch`).
+
+The connection is retried every 250 ms, so the panel may start first and the app or the VM may
+restart. Only security type None is supported, with raw encoding and DesktopSize. Log lines:
+`ScreenView: connected to ...`, `first frame <n> ms after connecting`, `touch down / up <x> <y>`,
+`disconnected (...)`.
+
 ## SHIFT
 
 SHIFT is a toggle on the panel (the unit's is momentary). It sends its press and release packets.
@@ -91,8 +121,11 @@ look, so SHIFT + pad and the other SHIFT-held behaviours do not trigger, as on a
 `--control FILE`: the panel reads lines `<seq> <command> [args]` appended to FILE and logs
 `PanelControl: ok <seq>` or `PanelControl: error <seq> <reason>`. `checks/lib/kickem_ctl` is the
 client. Commands: `press NAME`, `down NAME [VEL]`, `up NAME`, `hold NAME SECS [VEL]`,
-`turn P1..P4|JOG STEPS`, `slider 0..100`, `repeat MS N NAME`, `shot FILE.png`, `list [FILTER]`,
-`link`, `echo TEXT` (details in `PanelControl.h`). It drives the panel's controls directly, so it
+`turn P1..P4|JOG STEPS`, `slider 0..100`, `repeat MS N NAME`, `shot FILE.png [SCALE]`,
+`list [FILTER]`, `link`, `echo TEXT`, and for the embedded screen `screen` (state, frame rate,
+touch-to-frame latency), `screentouch X Y [X2 Y2 [MS]]` (a click or a drag on it, through the
+mouse's own path) and `screenshot FILE.png` (the last frame as received). Details in
+`PanelControl.h`. It drives the panel's controls directly, so it
 needs no window server and works while the Mac is locked.
 
 Names: the printed captions (`MAIN`, `PUSH`, `TAP TEMPO`, `GRID`), `Pad 1` to `Pad 16`, the icon

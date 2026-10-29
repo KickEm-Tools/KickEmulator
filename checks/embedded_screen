@@ -1,0 +1,171 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The Kick's screen embedded in the panel (kickem run --screen embedded): the panel shows the live
+# screen, popups included, and a click on it is a touch on the unit's screen. Each click here goes
+# through the panel's own mouse path (kickem_ctl screentouch: the panel's ScreenView maps it to
+# screen pixels and sends it as an RFB pointer event) to the app's screen mirror (fast mode,
+# KICK_SCREEN_MIRROR) or to QEMU's VNC server and the VM's usb-tablet (faithful mode). None of it
+# uses the test-control module's touches; that module only reads the result back (shot, list,
+# windows). Works with the Mac's screen locked.
+#
+#   checks/embedded_screen [--mode fast|vm] [--firmware URL|PATH] [--ref REF] [--no-build] [--no-fetch] [OUTDIR]
+#
+# Default OUTDIR: checks/out/embedded_screen. Exit status 0 when every check passes. About 40 s
+# after the build in fast mode, 90 s in faithful mode (hvf).
+#
+# Needs in the firmware: fast mode KICK_SCREEN_MIRROR (feature/screen-mirror) and the
+# test-control module (feature/desktop-seams); faithful mode nothing beyond what smoke needs.
+#
+# What it checks:
+#  1. the panel receives the screen (1024x600) and what it shows matches the app's own rendering
+#     (the Projects screen); PUSH loads the Starter Kit;
+#  2. a click on a list row in the embedded screen selects that row (BROWSE, Location row 2), read
+#     both from the app's rendering and from the frame the panel shows; the panel's window is
+#     resized to 500x505 first (and to 1240x1250 before 3), so the click mapping follows the scale;
+#  3. a click on a button in the embedded screen opens a dialog (PROGRAMS: PLAYHEAD CONTROL MENU),
+#     which is a popup on the app's window and is shown inside the embedded screen; a click on its
+#     Cancel closes it;
+#  4. the frame rate while the transport plays, and the click-to-frame latency.
+set -u
+NAME=embedded_screen
+VM_OK=1
+. "$(dirname "$0")/lib/common.sh"
+parse_args "$@"
+banner
+rm -f "$OUT"/*.png "$OUT"/*.txt
+FAILS=0
+pass() { echo "PASS  $*"; }
+fail() { echo "FAIL  $*"; FAILS=$((FAILS + 1)); }
+diffpng() { python3 -I "$CHECKS/lib/png_diff.py" "$@"; }
+changed() { sed -n 's/.* changed \([0-9.]*\)%.*/\1/p'; }   # the "changed" share from png_diff
+# The centre of the first showing component NAME (TestControl list): "X Y".
+centre() {
+    "$CTL" list "$1" | awk -F'\t' -v n="$1" '$2 == n { split($3, b, " "); printf "%d %d\n", b[1] + b[3] / 2, b[2] + b[4] / 2; exit }'
+}
+sel() {   # sel SHOT: the highlighted row of BROWSE's Location list (checks/lib/row_highlight.py)
+    python3 -I "$CHECKS/lib/row_highlight.py" "$1" 230 335 218 53 3 | sed -n 's/^selected //p'
+}
+# both NAME: the app's rendering (OUT/NAME.png) and the panel's received frame (OUT/NAME-embedded.png)
+both() {
+    "$CTL" shot "$OUT/$1.png" >/dev/null || fail "shot $1"
+    "$CTL" screenshot "$OUT/$1-embedded.png" >/dev/null || fail "screenshot $1"
+}
+
+trap stop_emulator EXIT
+trap 'exit 1' INT TERM
+echo "   Mac screen: $(screen_lock_state)"
+KICK_AUDIO_INPUT=silence start_emulator --screen embedded
+if [ "$(state screen)" != embedded ]; then
+    fail "the screen is not embedded (this ref lacks KICK_SCREEN_MIRROR? see $OUT/kickem.log)"
+    grep 'screen embedded' "$OUT/kickem.log" | sed 's/^/      /'
+    exit 1
+fi
+i=0
+until grep -q '^ScreenView: first frame' "$PLOG" || [ "$i" -ge 60 ]; do i=$((i + 1)); sleep 0.25; done
+if grep -q '^ScreenView: first frame' "$PLOG"; then
+    pass "panel shows the Kick screen: $(grep -m1 '^ScreenView: connected' "$PLOG" | sed 's/^ScreenView: //'); $(grep -m1 '^ScreenView: first frame' "$PLOG" | sed 's/^ScreenView: //')"
+else
+    fail "no frame in the panel"; exit 1
+fi
+[ "$MODE" = fast ] && grep -m1 '^ScreenMirror: serving' "$KLOG" | sed 's/^/      app: /'
+[ "$MODE" = vm ] && sleep 20   # the guest's Weston, Xwayland and the app's first screen
+
+#### 1. What the panel shows is the app's screen ##################################################
+sleep 1   # the Projects screen
+both projects
+"$CTL" panelshot "$OUT/projects-panel.png" 2 >/dev/null
+D=$(diffpng "$OUT/projects.png" "$OUT/projects-embedded.png")
+if awk -v c="$(printf '%s\n' "$D" | changed)" 'BEGIN { exit !(c != "" && c < 2.0) }'; then
+    pass "embedded frame matches the app's own rendering of the Projects screen ($D; projects-panel.png)"
+else
+    fail "embedded frame differs from the app's rendering: $D (projects.png, projects-embedded.png)"
+fi
+
+"$CTL" press PUSH >/dev/null || fail "PUSH not delivered"   # loads the Starter Kit
+wait_loaded '^Project: loaded' 2 || fail "the Starter Kit did not load"
+[ "$MODE" = vm ] && sleep 3
+
+#### 2. A click on a list row in the embedded screen selects it ####################################
+"$CTL" press BROWSE >/dev/null || fail "BROWSE not delivered"
+sleep 1.5
+both list-0
+L0=$(sel "$OUT/list-0.png"); E0=$(sel "$OUT/list-0-embedded.png")
+# A small panel window for this click, a large one for the next: the mapping follows the scale.
+echo "      $("$CTL" resize 500 505)"
+"$CTL" screentouch 83 323 >/dev/null || fail "screentouch on Location row 2"   # Demos
+sleep 1.2
+both list-1
+L1=$(sel "$OUT/list-1.png"); E1=$(sel "$OUT/list-1-embedded.png")
+LAT=$("$CTL" screen | sed -n 's/.* latency_ms=\([0-9.-]*\).*/\1/p')
+if [ "$L0" = 0 ] && [ "$L1" = 2 ]; then
+    pass "click on Location row 2 in the embedded screen selects it in the app (row $L0 -> $L1; list-1.png); touch-to-frame ${LAT} ms"
+else
+    fail "click on Location row 2: the app shows row '$L0' -> '$L1' highlighted (list-0.png, list-1.png)"
+fi
+if [ "$E0" = 0 ] && [ "$E1" = 2 ]; then pass "the embedded screen shows the new selection (row $E0 -> $E1; list-1-embedded.png)"
+else fail "the embedded screen shows row '$E0' -> '$E1' highlighted (list-1-embedded.png)"; fi
+[ "$MODE" = fast ] && grep '^ScreenMirror: touch' "$KLOG" | tail -2 | sed 's/^/      app: /'
+
+#### 3. A click opens a dialog, shown inside the embedded screen; a click on Cancel closes it ######
+"$CTL" press MAIN >/dev/null
+sleep 1.2
+both before-dialog
+echo "      $("$CTL" resize 1240 1250)"
+XY=$(centre PROGRAMS)
+if [ -z "$XY" ]; then
+    fail "no PROGRAMS button on the main screen"
+else
+    # shellcheck disable=SC2086
+    "$CTL" screentouch $XY >/dev/null || fail "screentouch on PROGRAMS"
+    sleep 1.2
+    if "$CTL" windows | grep -q '^overlay.*dialogDisplayer'; then
+        pass "click on PROGRAMS ($XY) in the embedded screen opens a dialog ($("$CTL" windows | grep -m1 '^overlay' | cut -f2,3 | tr '\t' ' '))"
+    else
+        fail "click on PROGRAMS ($XY): no dialog ($("$CTL" windows | tr '\n\t' '  '))"
+    fi
+    both dialog
+    "$CTL" panelshot "$OUT/dialog-panel.png" 2 >/dev/null
+    SAME=$(diffpng "$OUT/dialog.png" "$OUT/dialog-embedded.png")
+    MOVED=$(diffpng "$OUT/before-dialog-embedded.png" "$OUT/dialog-embedded.png")
+    if awk -v s="$(printf '%s\n' "$SAME" | changed)" -v m="$(printf '%s\n' "$MOVED" | changed)" 'BEGIN { exit !(s != "" && s < 2.0 && m > 5.0) }'; then
+        pass "the dialog shows inside the embedded screen (vs the app: $SAME; vs before: $MOVED; dialog-panel.png)"
+    else
+        fail "dialog in the embedded screen: vs the app $SAME, vs before $MOVED (dialog-embedded.png)"
+    fi
+    XY=$(centre Cancel)
+    if [ -n "$XY" ]; then
+        # shellcheck disable=SC2086
+        "$CTL" screentouch $XY >/dev/null || fail "screentouch on Cancel"
+        sleep 1
+        if "$CTL" windows | grep -q '^overlay'; then fail "Cancel ($XY) did not close the dialog"
+        else pass "click on the dialog's Cancel ($XY) in the embedded screen closes it"; fi
+    else
+        fail "no Cancel button in the dialog"
+    fi
+fi
+
+#### 4. Frame rate while playing, latency ##########################################################
+"$CTL" press PLAY >/dev/null
+sleep 6
+S=$("$CTL" screen)
+"$CTL" shot "$OUT/playing.png" >/dev/null
+"$CTL" screenshot "$OUT/playing-embedded.png" >/dev/null
+"$CTL" panelshot "$OUT/playing-panel.png" 2 >/dev/null
+"$CTL" press STOP >/dev/null
+FPS=$(printf '%s\n' "$S" | sed -n 's/.* fps5s=\([0-9.]*\).*/\1/p')
+echo "      while playing: $S"
+if awk -v f="${FPS:-0}" 'BEGIN { exit !(f >= 5) }'; then pass "the embedded screen follows the playing transport at $FPS updates/s (last 5 s)"
+else fail "embedded screen while playing: ${FPS:-?} updates/s"; fi
+
+alive && pass "Kick still running" || fail "Kick exited"
+[ "$MODE" = fast ] && "$CTL" windows | grep -q '^desktop' && fail "a separate desktop window appeared"
+stop_emulator
+trap - EXIT
+[ "$MODE" = fast ] && grep '^ScreenMirror: viewer gone' "$OUT/kick.log" | tail -1 | sed 's/^/      app: /'
+echo "   Mac screen at the end: $(screen_lock_state)"
+
+echo ""
+if [ "$FAILS" -eq 0 ]; then echo "EMBEDDED_SCREEN OK (logs and screenshots in $OUT)"; exit 0; fi
+echo "EMBEDDED_SCREEN FAILED: $FAILS check(s), see $OUT"
+exit 1

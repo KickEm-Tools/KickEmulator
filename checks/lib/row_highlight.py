@@ -65,4 +65,5 @@ def main():
         print('selected none')
 
 
-main()
+if __name__ == '__main__':
+    main()

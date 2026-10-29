@@ -61,17 +61,21 @@ case "${1:-}" in
         SEED="-v $CPM_SOURCE_CACHE:/seed:ro"
     fi
     COMMIT=$(git -C "$SRC" rev-parse HEAD 2>/dev/null || echo unknown)
-    say "building $SRC ($COMMIT) for linux/arm64 in $IMAGE; build tree and CPM cache in volume $VOLUME"
+    # One build tree per checkout. Every checkout is mounted at /src, so a tree shared between
+    # checkouts looked up to date to Ninja whenever its outputs were newer than this checkout's
+    # files (a fresh fetch of another ref), and packaged the other ref's binary.
+    TREE=build-$(printf '%s' "$SRC" | shasum | cut -c1-12)
+    say "building $SRC ($COMMIT) for linux/arm64 in $IMAGE; build tree /work/$TREE and CPM cache in volume $VOLUME"
     T0=$(date +%s)
     # shellcheck disable=SC2086
     docker run --rm --platform linux/arm64 -v "$SRC:/src:ro" -v "$VOLUME:/work" -v "$OUT:/out" $SEED \
-        -e COMMIT="$COMMIT" -e PKG="$PKG" -e JOBS="${KICKEM_VM_BUILD_JOBS:-}" "$IMAGE" sh -euc '
+        -e COMMIT="$COMMIT" -e PKG="$PKG" -e TREE="$TREE" -e JOBS="${KICKEM_VM_BUILD_JOBS:-}" "$IMAGE" sh -euc '
         git config --global --add safe.directory "*"
         if [ -d /seed/juce ] && [ ! -d /work/cpm/juce ]; then
             echo "seeding the CPM cache from the host"; mkdir -p /work/cpm; cp -a /seed/. /work/cpm/
         fi
-        if [ ! -f /work/build/CMakeCache.txt ]; then
-            cmake -S /src/Kick -B /work/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DTIMESTAMP=OFF \
+        if [ ! -f "/work/$TREE/CMakeCache.txt" ]; then
+            cmake -S /src/Kick -B "/work/$TREE" -G Ninja -DCMAKE_BUILD_TYPE=Release -DTIMESTAMP=OFF \
                   -DCPM_SOURCE_CACHE=/work/cpm
         fi
         # About 2.5 GB per compiler with -O3 -flto: more jobs than that run out of memory in Docker
@@ -79,8 +83,8 @@ case "${1:-}" in
         mem=$(awk "/MemTotal/ {print int(\$2 / 2500000)}" /proc/meminfo)
         jobs=${JOBS:-$(nproc)}; [ "$mem" -ge 1 ] && [ "$mem" -lt "$jobs" ] && jobs=$mem
         echo "building with $jobs jobs"
-        cmake --build /work/build --target Kick --parallel "$jobs"
-        bin=/work/build/apps/kick/Kick_artefacts/Release/Kick
+        cmake --build "/work/$TREE" --target Kick --parallel "$jobs"
+        bin="/work/$TREE/apps/kick/Kick_artefacts/Release/Kick"
         file "$bin"
         rm -rf "/out/$PKG" "/out/$PKG.tar.gz"
         mkdir -p "/out/$PKG"

@@ -545,9 +545,7 @@ def stop_run(d, quiet=False):
 def cmd_run(a):
     say("mode %s. What it cannot tell you: %s" % (a.mode, CANNOT_TELL[a.mode]))
     if a.mode == "vm":
-        path, _, _ = fetch(a.firmware, a.ref, force=a.force)
-        die("--mode vm (faithful mode) comes in phase 6 of /goal-standalone; the checkout is ready "
-            "for -DKICKEM_FIRMWARE_DIR=%s" % path, 3)
+        return cmd_run_vm(a)
     t_start = time.monotonic()
     path, commit, url, kick_build, panel_build = build(a)
     t_built = time.monotonic()
@@ -646,6 +644,152 @@ def cmd_run(a):
             release_lock([os.getpid()])
 
 
+# --- Faithful mode (--mode vm): modes/vm/kickem_vm.py ----------------------------------------
+# The fork's built Linux arm64 KT_Kick in a QEMU arm64 VM; the panel on the VM's serial port. The
+# VM itself (image, provisioning, boot, deploy, QMP) lives in modes/vm/kickem_vm.py; this block
+# only gets the artifact, builds the panel, holds the lock and starts the panel.
+def vm_module():
+    sys.path.insert(0, os.path.join(ROOT, "modes", "vm"))
+    import kickem_vm
+    return kickem_vm
+
+
+def vm_artifact(a, path, commit, url):
+    """The KT_Kick-linux-arm64 tarball: --artifact, else built from the checkout (artifact.sh --build)."""
+    if a.artifact:
+        return os.path.abspath(a.artifact)
+    out = os.path.join(build_root(url, a.ref), "vm-artifact")
+    tarball = os.path.join(out, "KT_Kick-linux-arm64.tar.gz")
+    manifest = os.path.join(out, "KT_Kick-linux-arm64", "manifest.json")
+    try:
+        built = json.load(open(manifest)).get("git_sha")
+    except (OSError, ValueError):
+        built = None
+    if os.path.exists(tarball) and (a.no_build or built == commit):
+        say("artifact: %s (%s)" % (tarball, (built or "?")[:12]))
+        return tarball
+    t0 = time.monotonic()
+    say("artifact: building KT_Kick for linux/arm64 (Debian 12) in Docker: modes/vm/artifact.sh --build")
+    r = subprocess.run([os.path.join(ROOT, "modes", "vm", "artifact.sh"), "--build", path, out])
+    if r.returncode != 0 or not os.path.exists(tarball):
+        die("could not build the Linux arm64 artifact (exit %d)" % r.returncode)
+    say("artifact built in %.0f s" % (time.monotonic() - t0))
+    return tarball
+
+
+def cmd_run_vm(a):
+    vm = vm_module()
+    t_start = time.monotonic()
+    path, commit, url = fetch(a.firmware, a.ref, force=a.force)
+    preflight(path, a.ignore_missing)
+    tarball = vm_artifact(a, path, commit, url)
+    root = build_root(url, a.ref)
+    panel_build = os.path.join(root, "panel")
+    log = os.path.join(root, "build.log")
+    with file_lock(root + ".lock"):
+        if not (a.no_build and os.path.exists(panel_app(panel_build))):
+            build_panel(path, panel_build, log)
+    vm.provision(argparse.Namespace(accel=a.accel or vm.default_accel(), force=False, timeout=3600))
+    t_built = time.monotonic()
+
+    d = run_dir(a)
+    os.makedirs(d, exist_ok=True)
+    old = read_state(d)
+    if old and old.get("mode") == "vm" and alive(old.get("qemu_pid", 0)):
+        stop_run_vm(d)
+    for f in ("state.json", "kick.log", "panel.log", "boot.log"):
+        if os.path.exists(os.path.join(d, f)):
+            os.remove(os.path.join(d, f))
+
+    t_wait = time.monotonic()
+    acquire_lock()
+    lock_wait = time.monotonic() - t_wait
+    started = []
+    try:
+        st = vm.boot(d, a.accel, a.display, a.vm_serial, a.sound, a.disk or [])
+        vm.update_state(d, lock_wait_s=round(lock_wait, 1))
+        started.append((st["qemu_pid"], "QEMU"))
+        set_lock_owner(st["qemu_pid"])
+        probe_host = os.path.abspath(a.probe) if a.probe else None
+        vm.update_state(d, probe_host=probe_host)
+        vm.deploy(d, tarball, path, vm.app_env(vm.GUEST_PROBE if a.probe else None), start_delay=not a.no_start_delay)
+
+        panel_log, kick_log = os.path.join(d, "panel.log"), os.path.join(d, "kick.log")
+        panel_ctl, test_ctl = os.path.join(d, "panel.ctl"), os.path.join(d, "test.ctl")
+        for f in (panel_ctl, test_ctl, kick_log):
+            open(f, "w").close()
+        dev = vm.read_state(d)["serial_device"]
+        transport = dev if dev.startswith("tcp:") else "serial:" + dev
+        cmd = [panel_app(panel_build), "--transport", transport, "--control", panel_ctl]
+        if a.throttle:
+            cmd += ["--throttle", str(a.throttle)]
+        say("starting the panel on the VM's serial port: " + " ".join(shlex.quote(c) for c in cmd))
+        with open(panel_log, "w") as lf:
+            panel = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                     cwd=d, start_new_session=True)
+        started.append((panel.pid, "panel"))
+        if not wait_for(panel_log, r"SimSerial: (?:listening on|connected to|opened) (\S+)", 40, [panel.pid]):
+            say("the panel did not open %s, see %s" % (transport, panel_log))
+            return 1
+        st = vm.update_state(d, firmware=url, ref=a.ref, commit=commit, panel_build=panel_build,
+                             kick_pid=st["qemu_pid"], panel_pid=panel.pid, launcher_pid=os.getpid(),
+                             device="/dev/ttyAMA0 (guest) = " + dev, kick_log=kick_log, panel_log=panel_log,
+                             panel_control=panel_ctl, test_control=test_ctl, probe=probe_host,
+                             build_s=round(t_built - t_start, 1), started=time.time())
+        t_app = time.monotonic()
+        vm.start_app(d)
+        say("ktkick.service started in the guest; waiting for the handshake")
+        ok = wait_for(kick_log, r"Send Comm Live", 120 if st["accel"] != "tcg" else 1200, [st["qemu_pid"], panel.pid])
+        live = ok and wait_for(panel_log, r"SimSerial: LIVE", 10, [st["qemu_pid"], panel.pid])
+        if not live:
+            say("no control-surface handshake; see %s, %s and %s" % (kick_log, panel_log, st["boot_log"]))
+            return 1
+        t_live = time.monotonic()
+        st = vm.update_state(d, live_s=round(t_live - t_app, 1), total_s=round(t_live - t_start, 1),
+                             guest_app_pid=vm.guest_app_pid(st))
+        say("handshake LIVE %.1f s after ktkick.service started (artifact + panel %.1f s, lock wait %.1f s, boot %.1f s, "
+            "deploy %.1f s; %.1f s since kickem started)" % (t_live - t_app, t_built - t_start, lock_wait,
+                                                             st.get("boot_s", 0), st.get("deploy_s", 0), t_live - t_start))
+        print("device    /dev/ttyAMA0 in the guest, %s here" % dev)
+        print("kick log  %s" % kick_log)
+        print("panel log %s" % panel_log)
+        print("boot log  %s" % st["boot_log"])
+        print("ssh       %s ssh --out %s" % (os.path.join(ROOT, "modes", "vm", "kickem_vm.py"), d))
+        print("state     %s" % state_path(d), flush=True)
+        if a.detach:
+            started.clear()
+            return 0
+        say("running; Ctrl-C (or quitting the panel or the VM) stops both")
+        stopping = []
+        signal.signal(signal.SIGTERM, lambda *_: stopping.append(1))
+        try:
+            while not stopping and alive(st["qemu_pid"]) and alive(panel.pid):
+                reap(panel.pid)
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            pass
+        return 0
+    finally:
+        if started:
+            stop_run_vm(d, quiet=True)
+            for pid, name in reversed(started):
+                stop_pid(pid, name)
+            release_lock([os.getpid()] + [p for p, _ in started])
+        elif lock_owner() == os.getpid():
+            release_lock([os.getpid()])
+
+
+def stop_run_vm(d, quiet=False):
+    vm = vm_module()
+    st = read_state(d) or {}
+    stop_pid(st.get("panel_pid", 0), "panel")
+    vm.stop(d, quiet=quiet)
+    release_lock((st.get("qemu_pid", 0), st.get("panel_pid", 0), st.get("launcher_pid", 0)))
+    if not quiet:
+        say("stopped the VM (pid %s) and the panel (pid %s)" % (st.get("qemu_pid"), st.get("panel_pid")))
+    return 0
+
+
 def cmd_fetch(a):
     fetch(a.firmware, a.ref, force=a.force)
     return 0
@@ -657,6 +801,9 @@ def cmd_build(a):
 
 
 def cmd_stop(a):
+    st = read_state(run_dir(a))
+    if st and st.get("mode") == "vm":
+        return stop_run_vm(run_dir(a))
     return stop_run(run_dir(a))
 
 
@@ -707,6 +854,14 @@ def main(argv=None):
     r.add_argument("--throttle", type=int, nargs="?", const=230400, default=0, metavar="BAUD", help="pace the panel's link at the unit's UART rate (default 230400)")
     r.add_argument("--transport", default="pty", help="panel transport: pty, tcp:HOST:PORT, serial:DEV[@BAUD] (default: pty)")
     r.add_argument("--out", help="directory for the run's logs, control files and state (default: <cache>/run)")
+    vmo = r.add_argument_group("faithful mode (--mode vm, modes/vm/README.md)")
+    vmo.add_argument("--artifact", metavar="TARBALL|DIR", help="a KT_Kick-linux-arm64 artifact (modes/vm/artifact.sh); default: build the ref in Docker")
+    vmo.add_argument("--accel", choices=("hvf", "kvm", "tcg"), help="QEMU accelerator (default: hvf on Apple Silicon, kvm on arm64 Linux, else tcg)")
+    vmo.add_argument("--display", action="store_true", help="show the VM's screen in a window (default: headless)")
+    vmo.add_argument("--vm-serial", choices=("pty", "tcp"), default="pty", help="the guest UART on a pty (default) or a TCP socket (Windows)")
+    vmo.add_argument("--sound", action="store_true", help="add a virtio sound card that plays to this computer's output")
+    vmo.add_argument("--disk", action="append", metavar="IMG", help="extra disk image (USB mass storage), e.g. a stand-in SD card or USB stick")
+    vmo.add_argument("--no-start-delay", action="store_true", help="start KT_Kick directly, not through the unit's kt_kick.sh (which sleeps 15 s)")
     r.set_defaults(func=cmd_run)
 
     for name, fn, hlp in (("stop", cmd_stop, "stop the running Kick and panel, release the lock"),

@@ -340,6 +340,21 @@ def use_checkout(url, ref):
     return path, commit, url
 
 
+def panel_build_dir(root):
+    """The panel is built from this emulator checkout. A build made from another checkout (a
+    second worktree) keeps its directory; this one gets panel-<hash of its path>. The firmware's
+    build is shared."""
+    plain = os.path.join(root, "panel")
+    try:
+        with open(os.path.join(plain, "CMakeCache.txt"), errors="replace") as f:
+            m = re.search(r"^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$", f.read(), re.M)
+        if m and os.path.realpath(m.group(1)) != os.path.realpath(ROOT):
+            return os.path.join(root, "panel-" + hashlib.sha1(os.path.realpath(ROOT).encode()).hexdigest()[:8])
+    except OSError:
+        pass
+    return plain
+
+
 def build(a):
     if getattr(a, "no_fetch", False):
         path, commit, url = use_checkout(a.firmware, a.ref)
@@ -347,7 +362,7 @@ def build(a):
         path, commit, url = fetch(a.firmware, a.ref, force=a.force)
     preflight(path, a.ignore_missing)
     root = build_root(url, a.ref)
-    kick_build, panel_build = os.path.join(root, "kick"), os.path.join(root, "panel")
+    kick_build, panel_build = os.path.join(root, "kick"), panel_build_dir(root)
     os.makedirs(root, exist_ok=True)
     log = os.path.join(root, "build.log")
     with file_lock(root + ".lock"):

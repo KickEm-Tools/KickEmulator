@@ -98,6 +98,44 @@ namespace
                     return juce::String( sim::PanelLink::stateName( link->state() ) ) + " peer=" + link->peer() + " in=" + juce::String( link->framesIn.load() )
                            + " out=" + juce::String( link->framesOut.load() ) + " bad=" + juce::String( link->badIn.load() );
                 } );
+            if( panelControl )
+                panelControl->onLinkCommand = [this]( const juce::String& Cmd, const juce::StringArray& Args ) -> juce::String {
+                    auto bytes = []( const juce::String& Hex, std::vector<std::uint8_t>& Out ) {
+                        const auto h = Hex.removeCharacters( " :" );
+                        if( h.length() % 2 != 0 || !h.containsOnly( "0123456789abcdefABCDEF" ) )
+                            return false;
+                        for( int i = 0; i < h.length(); i += 2 )
+                            Out.push_back( (std::uint8_t)h.substring( i, i + 2 ).getHexValue32() );
+                        return true;
+                    };
+                    if( Cmd == "raw" )
+                    {
+                        std::vector<std::uint8_t> b;
+                        if( Args.isEmpty() || !bytes( Args.joinIntoString( "" ), b ) )
+                            return "usage: raw HEX...";
+                        link->sendRaw( std::move( b ) );
+                        juce::Thread::sleep( 50 ); // let the writer put it on the wire before the ack
+                        return {};
+                    }
+                    if( Cmd == "split" )
+                    {
+                        std::vector<std::uint8_t> a, b;
+                        if( Args.size() != 3 || !Args[0].containsOnly( "0123456789" ) || !bytes( Args[1], a ) || !bytes( Args[2], b ) )
+                            return "usage: split MS HEX1 HEX2";
+                        const int ms = Args[0].getIntValue();
+                        link->sendRaw( std::move( a ), ms );
+                        link->sendRaw( std::move( b ) );
+                        juce::Thread::sleep( ms + 50 );
+                        return {};
+                    }
+                    if( Cmd == "close" )
+                    {
+                        link->closeTransport();
+                        return {};
+                    }
+                    std::string error;
+                    return link->reopenTransport( error ) ? juce::String() : "cannot reopen: " + juce::String( error );
+                };
         }
 
         void shutdown() override

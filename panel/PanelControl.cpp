@@ -242,6 +242,14 @@ namespace sim
             return ok();
         }
 
+        if( cmd == "raw" || cmd == "split" || cmd == "close" || cmd == "reopen" )
+        {
+            if( !onLinkCommand )
+                return fail( "no link" );
+            const auto r = onLinkCommand( cmd, tok );
+            return r.isEmpty() ? ok() : fail( r );
+        }
+
         if( cmd == "echo" )
         {
             log( "echo " + tok.joinIntoString( " " ) );

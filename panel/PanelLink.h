@@ -57,6 +57,15 @@ namespace sim
         /// Frames and queues a packet for the app. Any thread.
         void send( CPktMgr::HWMsg_t Msg );
 
+        /// Fault injection (serial_faults): queues Bytes exactly as given, written in one piece,
+        /// then waits PauseMs before the next write (so the next write is a separate read).
+        void sendRaw( std::vector<std::uint8_t> Bytes, int PauseMs = 0 );
+
+        /// Fault injection: closes the transport (the app sees a hang-up) and reopens it. With
+        /// pty:<link> the link then points at the new pseudo-terminal.
+        void closeTransport();
+        bool reopenTransport( std::string& Error );
+
         /// Called on the message thread for every request the app sends (LED, PAD, SLIDER, ...).
         std::function<void( const CPktMgr::HWMsg_t& )> onMessage;
         /// Called on the message thread when the handshake state changes.
@@ -92,7 +101,12 @@ namespace sim
 
         std::mutex                            queueLock;
         std::condition_variable               queueReady;
-        std::deque<std::vector<std::uint8_t>> queue;
+        struct Out
+        {
+            std::vector<std::uint8_t> bytes;
+            int                       pauseMs{ 0 };
+        };
+        std::deque<Out> queue;
 
         // Receive side (reader thread only).
         std::vector<std::uint8_t>             rxBuffer;

@@ -20,6 +20,10 @@
 //   shot FILE.png       render the panel to FILE.png, in-process
 //   list [FILTER]       log the panel's named controls ("PanelControl: item ...")
 //   link                log the link's state and frame counters ("PanelControl: link ...")
+//   raw HEX...          fault injection: write these bytes as they are, in one write
+//   split MS HEX1 HEX2  fault injection: write HEX1, wait MS ms, write HEX2 (two reads)
+//   close / reopen      fault injection: close the transport (the app sees a hang-up) / open
+//                       it again (with pty:<link>, the link then names the new pty)
 //   echo TEXT           log "PanelControl: echo TEXT" (a marker for scripts)
 //
 // Nothing here needs a window server: controls are driven directly, so it works while the
@@ -35,6 +39,10 @@ namespace sim
     public:
         /// Polls File for commands; Panel is the panel's root component. LinkInfo answers "link".
         PanelControl( juce::Component& Panel, const juce::File& File, std::function<juce::String()> LinkInfo );
+
+        /// The link's fault-injection commands (raw, split, close, reopen): returns an error, or
+        /// an empty string when done.
+        std::function<juce::String( const juce::String& Cmd, const juce::StringArray& Args )> onLinkCommand;
         ~PanelControl() override;
 
     private:

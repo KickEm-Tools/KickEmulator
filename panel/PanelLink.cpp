@@ -130,9 +130,42 @@ namespace sim
             logLine( "SimSerial: tx " + describe( Msg ) + " | " + hex( frame.data(), frame.size() ) );
         {
             std::lock_guard<std::mutex> g( queueLock );
-            queue.push_back( std::move( frame ) );
+            queue.push_back( { std::move( frame ), 0 } );
         }
         queueReady.notify_one();
+    }
+
+    void PanelLink::sendRaw( std::vector<std::uint8_t> Bytes, int PauseMs )
+    {
+        logLine( "SimSerial: tx raw | " + hex( Bytes.data(), Bytes.size() ) + ( PauseMs > 0 ? " (then " + juce::String( PauseMs ) + " ms pause)" : juce::String() ) );
+        {
+            std::lock_guard<std::mutex> g( queueLock );
+            queue.push_back( { std::move( Bytes ), PauseMs } );
+        }
+        queueReady.notify_one();
+    }
+
+    void PanelLink::closeTransport()
+    {
+        stop();
+        logLine( "SimSerial: closed " + juce::String( transport->peer() ) + " (fault injection)" );
+        juce::MessageManager::callAsync( [this] {
+            if( onState ) onState( State::Closed );
+        } );
+    }
+
+    bool PanelLink::reopenTransport( std::string& Error )
+    {
+        stop();
+        rxBuffer.clear();
+        connectedAt = {};
+        lastTry     = {};
+        tries       = 0;
+        {
+            std::lock_guard<std::mutex> g( queueLock );
+            queue.clear();
+        }
+        return start( Error );
     }
 
     void PanelLink::sendSystem( int Cmd, std::vector<int> Data )
@@ -149,20 +182,23 @@ namespace sim
     {
         while( running )
         {
-            std::vector<std::uint8_t> frame;
+            Out out;
             {
                 std::unique_lock<std::mutex> g( queueLock );
                 queueReady.wait_for( g, std::chrono::milliseconds( 200 ), [this] { return !queue.empty() || !running; } );
                 if( queue.empty() )
                     continue;
-                frame = std::move( queue.front() );
+                out = std::move( queue.front() );
                 queue.pop_front();
             }
+            auto& frame = out.bytes;
             // One write per frame: the app's reader drops a frame that arrives in two pieces.
             if( transport->write( frame.data(), frame.size() ) )
                 ++framesOut;
             else
                 logLine( "SimSerial: write failed (" + juce::String( std::strerror( errno ) ) + "), frame dropped: " + hex( frame.data(), frame.size() ) );
+            if( out.pauseMs > 0 )
+                std::this_thread::sleep_for( std::chrono::milliseconds( out.pauseMs ) );
         }
     }
 

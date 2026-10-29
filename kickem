@@ -321,8 +321,30 @@ def install_content(src, kick_build, fresh=False):
         "assets/Default/recent_project)%s" % (kick_build, "; demos, templates and prefs fresh" if fresh else ""))
 
 
+def use_checkout(url, ref):
+    """--no-fetch: the cached checkout as it is, local edits included."""
+    check_ref(ref)
+    url = normalise_firmware(url)
+    path = checkout_dir(url, ref)
+    if not os.path.isdir(os.path.join(path, ".git")):
+        die("--no-fetch: no checkout of %s %s yet in %s; run without --no-fetch once" % (url, ref, path))
+    commit = git("rev-parse", "HEAD", cwd=path, capture=True)
+    dirty = git("status", "--porcelain", "--untracked-files=no", cwd=path, capture=True)
+    if dirty:
+        commit += "+local"
+        say("--no-fetch: using %s with local changes:\n%s" % (path, dirty))
+    print("firmware  %s" % url)
+    print("ref       %s" % ref)
+    print("commit    %s" % commit)
+    print("checkout  %s" % path, flush=True)
+    return path, commit, url
+
+
 def build(a):
-    path, commit, url = fetch(a.firmware, a.ref, force=a.force)
+    if getattr(a, "no_fetch", False):
+        path, commit, url = use_checkout(a.firmware, a.ref)
+    else:
+        path, commit, url = fetch(a.firmware, a.ref, force=a.force)
     preflight(path, a.ignore_missing)
     root = build_root(url, a.ref)
     kick_build, panel_build = os.path.join(root, "kick"), os.path.join(root, "panel")
@@ -663,6 +685,7 @@ def main(argv=None):
 
     def building(sp):
         sp.add_argument("--no-build", action="store_true", help="skip the build when both programs exist")
+        sp.add_argument("--no-fetch", action="store_true", help="use the cached checkout as it is, local edits included")
         sp.add_argument("--ignore-missing", action="store_true", help="build even if the ref lacks what fast mode needs")
         sp.add_argument("--fresh", action="store_true", help="restore demos/ and templates/ and drop prefs/ in the build")
 

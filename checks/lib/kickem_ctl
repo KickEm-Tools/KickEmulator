@@ -17,7 +17,11 @@ Panel (acked as "PanelControl: ok <n>" in the panel log):
     panelshot OUT.png        render the panel
     link                     the link's state and frame counters
 Screen (acked as "TestControl: ok <n>" in the app log; needs feature/desktop-seams):
-    tap X Y                  touch pixel (X,Y) of the 1024x600 screen
+    tap X Y                  touch pixel (X,Y) of the 1024x600 screen (delivered to the touched
+                             component directly; works with the screen locked)
+    touch X Y                the same as a real touch through the window: JUCE dispatches it
+                             to the component, its mouse listeners and its parents' (list rows);
+                             needs the Kick window topmost there (fails when locked or covered)
     click NAME...            on-screen components by title ("WiFi", "Resources")
     clickat NAME FX FY       touch a titled component at a fraction of its size
     list [FILTER]            titled components on the screen
@@ -157,6 +161,8 @@ def main(argv):
         out(panel.send("link"), "link")
     elif cmd == "tap" and len(args) == 2:
         screen.send("tap %s %s" % tuple(args))
+    elif cmd == "touch" and len(args) == 2:
+        screen.send("touch %s %s" % tuple(args))
     elif cmd == "click":
         for name in args:
             screen.send("click " + q(name))

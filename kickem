@@ -39,6 +39,12 @@ it is started; a dead owner's lock is reclaimed) and waits up to $KICKEM_LOCK_WA
 (default 1800) for another instance to quit. It also waits while a Kick or KT_KickEM process
 runs without the lock.
 
+What it prints: on a terminal, one line per step with a spinner, its progress and its time, and
+Ctrl-O (or v) switches to a details view of what runs underneath (git, cmake, the compiler,
+docker, QEMU, the app's and the panel's logs) and back; --verbose starts there; --no-color or
+NO_COLOR for no colour. Anywhere else (a pipe, a file, CI, the checks) plain, stable lines:
+`kickem: <message>`, and `kickem: [ ok ] <step>  <result>  <time>` per step. cli/kickem_ui.py.
+
 Python 3.8+ standard library only.
 """
 
@@ -58,6 +64,12 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli"))
+import kickem_ui  # noqa: E402
+from kickem_ui import Failed, parse_build, parse_git  # noqa: E402
+
+UI = kickem_ui.UI()
+
 DEFAULT_FIRMWARE = "https://github.com/KickEm-Tools/0700-AAM.git"
 DEFAULT_REF = "main"
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -75,12 +87,31 @@ CANNOT_TELL = {
 
 
 def say(msg):
-    print("kickem: " + msg, file=sys.stderr, flush=True)
+    """A detail (plain mode: as always; the compact view: the log and the details view)."""
+    UI.info(msg)
 
 
-def die(msg, code=1):
-    say(msg)
-    sys.exit(code)
+def note(msg):
+    UI.note(msg)
+
+
+def warn(msg):
+    UI.warn(msg)
+
+
+def die(msg, code=1, log=None):
+    """Stops with MSG; a running step prints it under its ✘ line, else main() does."""
+    raise Failed(msg, code, log)
+
+
+def short_url(url):
+    """KickEm-Tools/0700-AAM for a GitHub URL, the path for a local repository."""
+    m = re.match(r"^(?:https?://|git@)github\.com[/:]([^/]+/[^/]+?)(?:\.git)?/*$", url)
+    if m:
+        return m.group(1)
+    if url.startswith("file://"):
+        return url[len("file://"):].replace(os.path.expanduser("~"), "~", 1)
+    return url
 
 
 def cache_dir():
@@ -162,7 +193,9 @@ def fetch(url, ref, force=False):
     if shutil.which("git") is None:
         die("git is not installed")
     path = checkout_dir(url, ref)
-    with file_lock(path + ".lock"):
+    log = path + ".fetch.log"
+    with UI.step("Fetch firmware %s@%s" % (short_url(url), ref), log=log, parse=parse_git) as s, \
+            file_lock(path + ".lock"):
         fresh = not os.path.isdir(os.path.join(path, ".git"))
         if fresh:
             say("fetching %s %s into %s" % (url, ref, path))
@@ -175,23 +208,29 @@ def fetch(url, ref, force=False):
             say("updating %s %s in %s" % (url, ref, path))
             if git("status", "--porcelain", "--untracked-files=no", cwd=path, capture=True) and not force:
                 die("%s has local changes; commit them elsewhere or run fetch --force to discard them" % path)
+        with open(log, "w"):
+            pass
+        s.log_off = 0
         try:
             # Works for a branch, a tag or a full commit SHA alike; --depth 1 keeps it small.
-            git("fetch", "--quiet", "--depth", "1", "--no-tags", "origin", ref, cwd=path)
-        except subprocess.CalledProcessError:
+            run_logged(["git", "fetch", "--progress", "--depth", "1", "--no-tags", "origin", ref], log, cwd=path,
+                       quiet_fail=True)
+        except Failed:
             if fresh:
                 shutil.rmtree(path, ignore_errors=True)
-            die("cannot fetch %s from %s" % (ref, url))
+            die("cannot fetch %s from %s" % (ref, url), log=log)
         git("checkout", "--quiet", "--force", "--detach", "FETCH_HEAD", cwd=path)
         commit = git("rev-parse", "HEAD", cwd=path, capture=True)
         subject = git("log", "-1", "--format=%s", cwd=path, capture=True)
         with open(os.path.join(path, ".git", "kickem-fetch.json"), "w") as f:
             json.dump({"url": url, "ref": ref, "commit": commit,
                        "fetched": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}, f, indent=2)
-    print("firmware  %s" % url)
-    print("ref       %s" % ref)
-    print("commit    %s  %s" % (commit, subject))
-    print("checkout  %s" % path, flush=True)
+        s.done("(%s)" % commit[:8])
+    show = UI.command == "fetch"
+    UI.out("firmware  %s" % url, show)
+    UI.out("ref       %s" % ref, show)
+    UI.out("commit    %s  %s" % (commit, subject), show)
+    UI.out("checkout  %s" % path, show)
     return path, commit, url
 
 
@@ -247,8 +286,8 @@ def preflight(src, ignore=False):
     missing_required = []
     for what, rel, marker, branch, required in NEEDS:
         if not has_marker(os.path.join(src, rel), marker):
-            say("%s: this ref lacks %s (%s in %s; KickEm-Tools/0700-AAM branch %s)"
-                % ("MISSING" if required else "missing", what, marker or "the file", rel, branch))
+            warn("%s: this ref lacks %s (%s in %s; KickEm-Tools/0700-AAM branch %s)"
+                 % ("MISSING" if required else "missing", what, marker or "the file", rel, branch))
             if required:
                 missing_required.append(branch)
     if missing_required and not ignore:
@@ -265,17 +304,17 @@ def build_env():
     return env
 
 
-def run_logged(cmd, log, cwd=None, env=None):
+def run_logged(cmd, log, cwd=None, env=None, quiet_fail=False):
+    """Runs CMD with its output appended to LOG (the running step streams and parses it). On
+    failure: Failed, whose step prints the end of the log and its path."""
     say("$ " + " ".join(shlex.quote(c) for c in cmd))
     with open(log, "a") as f:
         f.write("\n$ %s\n" % " ".join(shlex.quote(c) for c in cmd))
         f.flush()
-        p = subprocess.run(cmd, cwd=cwd, env=env, stdout=f, stderr=subprocess.STDOUT)
+        p = subprocess.run(cmd, cwd=cwd, env=env, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
     if p.returncode != 0:
-        with open(log, errors="replace") as f:
-            tail = f.readlines()[-25:]
-        sys.stderr.write("".join(tail))
-        die("failed (exit %d), full log: %s" % (p.returncode, log))
+        raise Failed(None if quiet_fail else "failed (exit %d): %s" % (p.returncode, " ".join(shlex.quote(c) for c in cmd[:3])),
+                     log=log)
 
 
 def jobs():
@@ -292,28 +331,139 @@ def kick_app(kick_build):
 
 
 def panel_app(panel_build):
+    """The panel's executable. macOS: inside the app bundle KickEm.app, so the panel is a
+    regular app (Dock, Command-Tab, its name and icon); elsewhere a plain executable."""
+    if IS_MAC:
+        return os.path.join(panel_build, "panel", "KickEm.app", "Contents", "MacOS", "KickEm")
     return os.path.join(panel_build, "panel", "kickem-panel")
+
+
+def juce_tag(src):
+    """The JUCE tag the firmware pins (Kick/3rdParty.cmake), for the step's label."""
+    try:
+        with open(os.path.join(src, "Kick", "3rdParty.cmake"), errors="replace") as f:
+            m = re.search(r"^\s*set\(\s*JUCE_GIT_TAG\s+([^\s)]+)", f.read(), re.M)
+        return m.group(1) if m else ""
+    except OSError:
+        return ""
+
+
+JUCE_MB = 185  # JUCE 7.0.12 in the CPM cache (a checkout plus its git objects), for the progress text
+
+
+def du(path):
+    total = 0
+    for d, _, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.lstat(os.path.join(d, f)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def juce_cached(cpm):
+    d = os.path.join(cpm, "juce")
+    try:
+        return any(os.path.exists(os.path.join(d, h, "CMakeLists.txt")) for h in os.listdir(d))
+    except OSError:
+        return False
+
+
+def configure_step(label, cmd, log, env, src):
+    """A CMake configure; when JUCE is not in the CPM cache yet, its download is a step of its own."""
+    cpm = env["CPM_SOURCE_CACHE"]
+    if juce_cached(cpm):
+        with UI.step(label, log=log, parse=parse_build):
+            run_logged(cmd, log, env=env)
+        return
+    tag = juce_tag(src) or "?"
+    before = du(os.path.join(cpm, "juce"))
+    state = {"done": False}
+
+    def parse(line):
+        if not state["done"] and ("Downloaded JUCE repository" in line or "KickEmulator: JUCE " in line
+                                  or ("CPM: Adding package JUCE" in line and " at " in line)):
+            state["done"] = True
+            st.next(label, "%s into %s" % (kickem_ui.fmt_bytes(du(os.path.join(cpm, "juce")) - before), cpm))
+        return parse_build(line)
+
+    def poll():
+        if state["done"]:
+            return None
+        got = du(os.path.join(cpm, "juce")) - before
+        return "%s / ~%d MB" % (kickem_ui.fmt_bytes(got), JUCE_MB) if got > 0 else "starting"
+
+    with UI.step("Download JUCE %s (CPM, once per cache)" % tag, log=log, parse=parse, poll=poll) as st:
+        run_logged(cmd, log, env=env)
+        if not state["done"]:  # no line marked the end of the download: one line for both
+            st.done("%s into %s; %s configured" % (kickem_ui.fmt_bytes(du(os.path.join(cpm, "juce")) - before), cpm, label.split()[-1]))
+
+
+class CompileProgress:
+    """A Makefile build's progress: Make prints `[ xx%] Building ...` when it starts a file, so
+    with -j16 the percentage reaches 96 % long before the compiler is done. This counts the object
+    files written since the step began against the files started."""
+
+    def __init__(self, build_dir):
+        self.dir, self.t0, self.started, self.done, self.pct = build_dir, time.time(), 0, 0, ""
+
+    def parse(self, line):
+        if re.match(r"^\[\s*\d+%\] Building ", line):
+            self.started += 1
+        m = re.match(r"^\[\s*(\d+)%\] Linking ", line)
+        if m:
+            self.pct = "linking"
+        return self.text()
+
+    def poll(self):
+        n = 0
+        for d, _, files in os.walk(self.dir):
+            for f in files:
+                if f.endswith(".o"):
+                    try:
+                        if os.stat(os.path.join(d, f)).st_mtime >= self.t0:
+                            n += 1
+                    except OSError:
+                        pass
+        self.done = n
+        return self.text()
+
+    def text(self):
+        if self.pct == "linking":
+            return "[%d/%d] linking" % (self.started, self.started)
+        if not self.started:
+            return ""
+        return "[%d/%d] compiled" % (min(self.done, self.started), self.started)
 
 
 def build_firmware(src, kick_build, log):
     env = build_env()
     os.makedirs(kick_build, exist_ok=True)
     if not os.path.exists(os.path.join(kick_build, "CMakeCache.txt")):
-        run_logged(["cmake", "-S", os.path.join(src, "Kick"), "-B", kick_build, "-DCMAKE_BUILD_TYPE=Release",
-                    "-DTIMESTAMP=OFF", "-DCPM_SOURCE_CACHE=" + env["CPM_SOURCE_CACHE"]], log, env=env)
-    run_logged(["cmake", "--build", kick_build, "--target", "Kick", "-j", jobs()], log, env=env)
-    if not os.path.exists(kick_app(kick_build)):
-        die("the build finished but %s is missing" % kick_app(kick_build))
+        configure_step("Configure Kick", ["cmake", "-S", os.path.join(src, "Kick"), "-B", kick_build, "-DCMAKE_BUILD_TYPE=Release",
+                                          "-DTIMESTAMP=OFF", "-DCPM_SOURCE_CACHE=" + env["CPM_SOURCE_CACHE"]], log, env, src)
+    cp = CompileProgress(kick_build)
+    with UI.step("Build Kick", log=log, parse=cp.parse, poll=cp.poll) as st:
+        run_logged(["cmake", "--build", kick_build, "--target", "Kick", "-j", jobs()], log, env=env)
+        st.done("%d files compiled" % cp.started if cp.started else "up to date")
+        if not os.path.exists(kick_app(kick_build)):
+            die("the build finished but %s is missing" % kick_app(kick_build))
 
 
 def build_panel(src, panel_build, log):
     env = build_env()
     os.makedirs(panel_build, exist_ok=True)
     if not os.path.exists(os.path.join(panel_build, "CMakeCache.txt")):
-        run_logged(["cmake", "-S", ROOT, "-B", panel_build, "-DCMAKE_BUILD_TYPE=Release",
-                    "-DKICKEM_FIRMWARE_DIR=" + src, "-DKICKEM_PROTOCOL_JUCE=juce",
-                    "-DCPM_SOURCE_CACHE=" + env["CPM_SOURCE_CACHE"]], log, env=env)
-    run_logged(["cmake", "--build", panel_build, "--target", "kickem-panel", "-j", jobs()], log, env=env)
+        configure_step("Configure panel", ["cmake", "-S", ROOT, "-B", panel_build, "-DCMAKE_BUILD_TYPE=Release",
+                                           "-DKICKEM_FIRMWARE_DIR=" + src, "-DKICKEM_PROTOCOL_JUCE=juce",
+                                           "-DCPM_SOURCE_CACHE=" + env["CPM_SOURCE_CACHE"]], log, env, src)
+    cp = CompileProgress(panel_build)
+    with UI.step("Build panel", log=log, parse=cp.parse, poll=cp.poll) as st:
+        run_logged(["cmake", "--build", panel_build, "--target", "kickem-panel", "-j", jobs()], log, env=env)
+        if not os.path.exists(panel_app(panel_build)):
+            die("the build finished but %s is missing" % panel_app(panel_build))
+        st.done(("%d files compiled" % cp.started if cp.started else "up to date") + (", KickEm.app" if IS_MAC else ""))
 
 
 def copytree(src, dst):
@@ -346,6 +496,7 @@ def install_content(src, kick_build, fresh=False):
                  os.path.join(kick_build, "assets", "Default", "recent_project", "Starter Kit.png"))
     say("Starter Kit installed into %s (assets/StarterKit, data/samplesKick/StarterKit, demos/Starter Kit, "
         "assets/Default/recent_project)%s" % (kick_build, "; demos, templates and prefs fresh" if fresh else ""))
+    UI.line("ok", "Install Starter Kit", "demos, templates and prefs fresh" if fresh else "")
 
 
 def use_checkout(url, ref):
@@ -359,11 +510,12 @@ def use_checkout(url, ref):
     dirty = git("status", "--porcelain", "--untracked-files=no", cwd=path, capture=True)
     if dirty:
         commit += "+local"
-        say("--no-fetch: using %s with local changes:\n%s" % (path, dirty))
-    print("firmware  %s" % url)
-    print("ref       %s" % ref)
-    print("commit    %s" % commit)
-    print("checkout  %s" % path, flush=True)
+        warn("--no-fetch: using %s with local changes:\n%s" % (path, dirty))
+    UI.line("skip", "Fetch firmware %s@%s" % (short_url(url), ref), "--no-fetch: the cached checkout (%s)" % commit[:8])
+    UI.out("firmware  %s" % url, False)
+    UI.out("ref       %s" % ref, False)
+    UI.out("commit    %s" % commit, False)
+    UI.out("checkout  %s" % path, False)
     return path, commit, url
 
 
@@ -395,10 +547,12 @@ def build(a):
     with file_lock(root + ".lock"):
         if a.no_build and os.path.exists(kick_app(kick_build)) and os.path.exists(panel_app(panel_build)):
             say("--no-build: using %s" % root)
+            UI.line("skip", "Build Kick and the panel", "--no-build: the existing build")
         else:
             t0 = time.monotonic()
             first = not os.path.exists(kick_app(kick_build))
             say("building the firmware's Kick app in %s (log %s)" % (kick_build, log))
+            UI.follow(log, "build")
             build_firmware(path, kick_build, log)
             t1 = time.monotonic()
             say("building the panel in %s" % panel_build)
@@ -409,8 +563,8 @@ def build(a):
                 f.write(json.dumps({"commit": commit, "first": first, "kick_s": round(t1 - t0, 1),
                                     "panel_s": round(t2 - t1, 1), "at": time.time()}) + "\n")
         install_content(path, kick_build, fresh=getattr(a, "fresh", False))
-    print("kick      %s" % kick_app(kick_build))
-    print("panel     %s" % panel_app(panel_build), flush=True)
+    UI.out("kick      %s" % kick_app(kick_build), UI.command == "build")
+    UI.out("panel     %s" % panel_app(panel_build), UI.command == "build")
     return path, commit, url, kick_build, panel_build
 
 
@@ -454,37 +608,50 @@ def running_apps():
 def acquire_lock(wait=None):
     """Takes the machine-wide lock, waiting for another instance to quit. Owner: this process."""
     wait = int(os.environ.get("KICKEM_LOCK_WAIT", "1800")) if wait is None else wait
-    waited, ownerless_since = 0, None
-    while True:
-        try:
-            os.mkdir(LOCK)
-            with open(os.path.join(LOCK, "pid"), "w") as f:
-                f.write("%d\n" % os.getpid())
-            others = running_apps()
-            if not others:
-                return
-            shutil.rmtree(LOCK, ignore_errors=True)  # someone runs Kick without the lock; wait for it
-            if waited == 0:
-                say("a Kick / KT_KickEM process runs without the lock (pid %s); waiting for it to quit"
-                    % ", ".join(map(str, others)))
-        except FileExistsError:
-            owner = lock_owner()
-            if owner and not alive(owner):
-                say("reclaiming the lock of dead pid %d" % owner)
-                shutil.rmtree(LOCK, ignore_errors=True)
-                continue
-            if not owner:
-                # A launcher between mkdir and writing its pid; give it 30 s, as sim_launch.sh does.
-                ownerless_since = ownerless_since if ownerless_since is not None else waited
-                if waited - ownerless_since >= 30 and not running_apps():
+    waited, ownerless_since, st = 0, None, None
+    try:
+        while True:
+            try:
+                os.mkdir(LOCK)
+                with open(os.path.join(LOCK, "pid"), "w") as f:
+                    f.write("%d\n" % os.getpid())
+                others = running_apps()
+                if not others:
+                    if st:
+                        st.done("waited %s" % kickem_ui.fmt_time(st.elapsed()))
+                    return
+                shutil.rmtree(LOCK, ignore_errors=True)  # someone runs Kick without the lock; wait for it
+                if waited == 0:
+                    say("a Kick / KT_KickEM process runs without the lock (pid %s); waiting for it to quit"
+                        % ", ".join(map(str, others)))
+                    st = UI.step("Wait for Kick (pid %s, started without the lock) to quit" % ", ".join(map(str, others))).__enter__()
+            except FileExistsError:
+                owner = lock_owner()
+                if owner and not alive(owner):
+                    say("reclaiming the lock of dead pid %d" % owner)
                     shutil.rmtree(LOCK, ignore_errors=True)
                     continue
-            if waited == 0:
-                say("waiting for another emulator to quit (lock %s, pid %s)..." % (LOCK, lock_owner() or "?"))
-        if waited >= wait:
-            die("another emulator (lock %s, pid %s) is still running after %d s" % (LOCK, lock_owner() or "?", wait))
-        time.sleep(5)
-        waited += 5
+                if not owner:
+                    # A launcher between mkdir and writing its pid; give it 30 s, as sim_launch.sh does.
+                    ownerless_since = ownerless_since if ownerless_since is not None else waited
+                    if waited - ownerless_since >= 30 and not running_apps():
+                        shutil.rmtree(LOCK, ignore_errors=True)
+                        continue
+                if waited == 0:
+                    say("waiting for another emulator to quit (lock %s, pid %s)..." % (LOCK, lock_owner() or "?"))
+                    st = UI.step("Wait for the other emulator to quit (lock %s, pid %s)" % (LOCK, lock_owner() or "?")).__enter__()
+            if waited >= wait:
+                die("another emulator (lock %s, pid %s) is still running after %d s" % (LOCK, lock_owner() or "?", wait))
+            time.sleep(5)
+            waited += 5
+    except BaseException:
+        if st:
+            st.__exit__(*sys.exc_info())
+            st = None
+        raise
+    finally:
+        if st:
+            st.__exit__(None, None, None)
 
 
 def set_lock_owner(pid):
@@ -597,6 +764,14 @@ def remove_socket(p):
         pass
 
 
+def done_msg(msg):
+    """A result line: `kickem: <msg>` in plain mode, `✔ <Msg>` on a terminal."""
+    if UI.color or UI.fancy:
+        UI._writeerr("%s %s\n" % (UI.style(kickem_ui.OK, "green"), msg[:1].upper() + msg[1:]))
+    else:
+        say(msg)
+
+
 def stop_run(d, quiet=False):
     st = read_state(d)
     if not st:
@@ -610,12 +785,41 @@ def stop_run(d, quiet=False):
     st["stopped"] = time.time()
     write_state(d, st)
     if not quiet:
-        say("stopped Kick (pid %s) and the panel (pid %s)" % (st.get("kick_pid"), st.get("panel_pid")))
+        done_msg("stopped Kick (pid %s) and the panel (pid %s)" % (st.get("kick_pid"), st.get("panel_pid")))
     return 0
+
+
+def wait_step(label, path, pattern, timeout, pids, fail, log=None, result=None):
+    """A step that waits for PATTERN in PATH; FAIL is the message when it does not come."""
+    with UI.step(label, log=log or path) as st:
+        m = wait_for(path, pattern, timeout, pids)
+        if not m:
+            die(fail, log=log or path)
+        st.done(result(m) if result else "")
+    return m
+
+
+def foreground_loop(label, pids, detail=""):
+    """Runs until a pid exits, Ctrl-C or SIGTERM; the compact view shows how long it has run."""
+    stopping = []
+    signal.signal(signal.SIGTERM, lambda *_: stopping.append(1))
+    with UI.step(label) as st:
+        st.set(detail)
+        try:
+            while not stopping and all(alive(p) for p in pids):
+                for p in pids:
+                    reap(p)
+                time.sleep(0.25)
+            gone = [p for p in pids if not alive(p)]
+            st.done("stopped: %s" % ("SIGTERM" if stopping else "pid %s exited" % ", ".join(map(str, gone))))
+        except KeyboardInterrupt:
+            st.done("stopped: Ctrl-C")
 
 
 def cmd_run(a):
     say("mode %s. What it cannot tell you: %s" % (a.mode, CANNOT_TELL[a.mode]))
+    if UI.fancy:
+        note("mode %s: %s" % (a.mode, CANNOT_TELL[a.mode]))
     if a.mode == "vm":
         return cmd_run_vm(a)
     t_start = time.monotonic()
@@ -641,10 +845,10 @@ def cmd_run(a):
         # The screen: embedded in the panel through the firmware's mirror, or the app's window.
         screen, screen_sock = a.screen, None
         if screen == "embedded" and not has_screen_mirror(path):
-            say("--screen embedded: this ref lacks %s (%s in %s; KickEm-Tools/0700-AAM %s, in its main since "
-                "2026-10-29: merge or rebase onto it). Falling back to --screen window: the Kick screen is the "
-                "app's own window."
-                % (SCREEN_MIRROR[0], SCREEN_MIRROR[2], SCREEN_MIRROR[1], SCREEN_MIRROR[3]))
+            warn("--screen embedded: this ref lacks %s (%s in %s; KickEm-Tools/0700-AAM %s, in its main since "
+                 "2026-10-29: merge or rebase onto it). Falling back to --screen window: the Kick screen is the "
+                 "app's own window."
+                 % (SCREEN_MIRROR[0], SCREEN_MIRROR[2], SCREEN_MIRROR[1], SCREEN_MIRROR[3]))
             screen = "window"
         if screen == "embedded":
             screen_sock = screen_socket(d)
@@ -656,15 +860,16 @@ def cmd_run(a):
         if screen_sock:
             cmd += ["--screen", "embedded", "--screen-source", "unix:" + screen_sock]
         say("starting the panel: " + " ".join(shlex.quote(c) for c in cmd))
+        open(panel_log, "w").close()
+        UI.follow(panel_log)
         with open(panel_log, "w") as lf:
             panel = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                      cwd=d, start_new_session=True)
         started.append((panel.pid, "panel"))
         set_lock_owner(panel.pid)
-        m = wait_for(panel_log, r"SimSerial: (?:listening on|connected to|opened) (\S+)", 20, [panel.pid])
-        if not m:
-            say("the panel did not open its transport, see %s" % panel_log)
-            return 1
+        m = wait_step("Start panel", panel_log, r"SimSerial: (?:listening on|connected to|opened) (\S+)", 20, [panel.pid],
+                      "the panel did not open its transport, see %s" % panel_log,
+                      result=lambda m: "%s (pid %d)" % (m.group(1), panel.pid))
         device = m.group(1)
 
         # The firmware's desktop app, from its build directory (it resolves its data from there).
@@ -683,6 +888,9 @@ def cmd_run(a):
         shown = {k: env[k] for k in ("KICK_SERIAL_DEVICE", "KICK_TEST_CONTROL", "KICK_SCREEN_MIRROR", "KICK_AUDIO_INPUT",
                                      "KICK_AUDIO_PROBE", "KICK_HARDWARE", "KICK_LOG_NOTES") if k in env}
         say("starting Kick: cd %s && %s %s" % (kick_build, " ".join("%s=%s" % kv for kv in shown.items()), app))
+        open(kick_log, "w").close()
+        UI.follow(kick_log)
+        t_kick = time.monotonic()
         with open(kick_log, "w") as lf:
             kick = subprocess.Popen([app], stdout=lf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                     cwd=kick_build, env=env, start_new_session=True)
@@ -696,44 +904,41 @@ def cmd_run(a):
               "started": time.time(), "build_s": round(t_built - t_start, 1)}
         write_state(d, st)
 
-        ok = wait_for(kick_log, r"Send Comm Live", 90, [kick.pid, panel.pid])
-        live = ok and wait_for(panel_log, r"SimSerial: LIVE", 10, [kick.pid, panel.pid])
-        if not live:
-            say("no control-surface handshake; see %s and %s" % (kick_log, panel_log))
-            return 1
+        nohs = "no control-surface handshake; see %s and %s" % (kick_log, panel_log)
+        wait_step("Start Kick", kick_log, r"Send Comm Live", 90, [kick.pid, panel.pid], nohs,
+                  result=lambda m: "pid %d, %s" % (kick.pid, "screen in the panel" if screen_sock else "its own window"))
+        wait_step("Handshake", panel_log, r"SimSerial: LIVE", 10, [kick.pid, panel.pid], nohs,
+                  result=lambda m: "LIVE (%.2f s after Kick started)" % (time.monotonic() - t_kick))
         t_live = time.monotonic()
         st["live_s"] = round(t_live - t_built, 1)
         write_state(d, st)
         say("handshake LIVE %.1f s after the build (%.1f s since kickem started)" % (t_live - t_built, t_live - t_start))
         if screen_sock:
-            if wait_for(panel_log, r"ScreenView: first frame", 15, [kick.pid, panel.pid]):
-                say("the Kick screen is embedded in the panel (KICK_SCREEN_MIRROR=%s)" % screen_sock)
-            else:
-                say("warning: no frame from the screen mirror yet; see %s and %s" % (kick_log, panel_log))
-        print("screen    %s" % ("embedded in the panel" if screen_sock else "the app's own window"))
-        print("device    %s" % device)
-        print("kick log  %s" % kick_log)
-        print("panel log %s" % panel_log)
-        print("state     %s" % state_path(d), flush=True)
+            with UI.step("Embed the Kick screen", log=panel_log) as s:
+                if wait_for(panel_log, r"ScreenView: first frame", 15, [kick.pid, panel.pid]):
+                    say("the Kick screen is embedded in the panel (KICK_SCREEN_MIRROR=%s)" % screen_sock)
+                    s.done("first frame in the panel")
+                else:
+                    warn("warning: no frame from the screen mirror yet; see %s and %s" % (kick_log, panel_log))
+                    s.done("no frame yet")
+        UI.out("screen    %s" % ("embedded in the panel" if screen_sock else "the app's own window"))
+        UI.out("device    %s" % device)
+        UI.out("kick log  %s" % kick_log)
+        UI.out("panel log %s" % panel_log)
+        UI.out("state     %s" % state_path(d))
         if a.detach:
             started.clear()  # left running for `kickem stop`
+            UI.note("left running: `kickem stop%s` stops it" % (" --out " + shlex.quote(d) if a.out else ""))
             return 0
 
         say("running; Ctrl-C (or quitting either program) stops both")
-        stopping = []
-        signal.signal(signal.SIGTERM, lambda *_: stopping.append(1))
-        try:
-            while not stopping and alive(kick.pid) and alive(panel.pid):
-                reap(kick.pid)
-                reap(panel.pid)
-                time.sleep(0.5)
-        except KeyboardInterrupt:
-            pass
+        foreground_loop("Running", [kick.pid, panel.pid], "the panel and Kick; quitting either stops both")
         return 0
     finally:
-        for pid, name in reversed(started):
-            stop_pid(pid, name)
         if started:
+            with UI.step("Stop Kick and the panel"):
+                for pid, name in reversed(started):
+                    stop_pid(pid, name)
             release_lock([os.getpid()] + [p for p, _ in started])
         elif lock_owner() == os.getpid():
             release_lock([os.getpid()])
@@ -746,12 +951,27 @@ def cmd_run(a):
 def vm_module():
     sys.path.insert(0, os.path.join(ROOT, "modes", "vm"))
     import kickem_vm
+
+    def vm_die(msg, code=1):
+        raise Failed(msg, code)
+    kickem_vm.say = lambda msg: UI.info("vm: " + msg) if UI.fancy else UI._writeerr("kickem vm: " + msg + "\n")
+    kickem_vm.die = vm_die
     return kickem_vm
+
+
+def last_line(*paths):
+    """The last non-empty line of the first readable PATH, for a step's progress."""
+    for p in paths:
+        t = kickem_ui.tail_text(p, max(0, os.path.getsize(p) - 4096) if os.path.exists(p) else 0, 1) if p else ""
+        if t.strip():
+            return kickem_ui.ANSI.sub("", t.strip())[:70]
+    return None
 
 
 def vm_artifact(a, path, commit, url):
     """The KT_Kick-linux-arm64 tarball: --artifact, else built from the checkout (artifact.sh --build)."""
     if a.artifact:
+        UI.line("skip", "Build KT_Kick for linux/arm64", "--artifact %s" % a.artifact)
         return os.path.abspath(a.artifact)
     out = os.path.join(build_root(url, a.ref), "vm-artifact")
     tarball = os.path.join(out, "KT_Kick-linux-arm64.tar.gz")
@@ -762,14 +982,60 @@ def vm_artifact(a, path, commit, url):
         built = None
     if os.path.exists(tarball) and (a.no_build or built == commit):
         say("artifact: %s (%s)" % (tarball, (built or "?")[:12]))
+        UI.line("skip", "Build KT_Kick for linux/arm64", "built already (%s)" % (built or "?")[:8])
         return tarball
     t0 = time.monotonic()
-    say("artifact: building KT_Kick for linux/arm64 (Debian 12) in Docker: modes/vm/artifact.sh --build")
-    r = subprocess.run([os.path.join(ROOT, "modes", "vm", "artifact.sh"), "--build", path, out])
-    if r.returncode != 0 or not os.path.exists(tarball):
-        die("could not build the Linux arm64 artifact (exit %d)" % r.returncode)
+    os.makedirs(out, exist_ok=True)
+    log = os.path.join(out, "artifact-build.log")
+    open(log, "w").close()
+    say("artifact: building KT_Kick for linux/arm64 (Debian 12) in Docker: modes/vm/artifact.sh --build (log %s)" % log)
+    image = os.environ.get("KICKEM_VM_BUILDER_IMAGE", "kickem-vm-builder:bookworm")
+    has_image = subprocess.run(["docker", "image", "inspect", image], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL).returncode == 0 if shutil.which("docker") else True
+    label = "Build KT_Kick for linux/arm64 (Docker, Debian 12)"
+    state = {"image": not has_image}
+
+    def parse(line):
+        if state["image"] and line.startswith("artifact: building ") and "builder image" not in line:
+            state["image"] = False
+            st.next(label, image)
+        return parse_build(line)
+
+    cmd = [os.path.join(ROOT, "modes", "vm", "artifact.sh"), "--build", path, out]
+    with UI.step("Build the Docker image %s (once)" % image if not has_image else label, log=log, parse=parse) as st:
+        if UI.fancy:
+            with open(log, "a") as f:
+                r = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        else:
+            r = subprocess.run(cmd, stdin=subprocess.DEVNULL)  # plain: its output straight through, as before
+            log = None
+        if r.returncode != 0 or not os.path.exists(tarball):
+            die("could not build the Linux arm64 artifact (exit %d)" % r.returncode, log=log)
+        st.done("(%s)" % commit[:8])
     say("artifact built in %.0f s" % (time.monotonic() - t0))
     return tarball
+
+
+def vm_image(vm, accel):
+    """The provisioned Debian 12 image: downloaded and provisioned once, two steps."""
+    if os.path.exists(vm.vm_path(vm.PROVISIONED)):
+        vm.say("provisioned image exists: %s" % vm.vm_path(vm.PROVISIONED))
+        UI.line("skip", "VM image", "provisioned already (%s)" % vm.vm_path(vm.PROVISIONED).replace(os.path.expanduser("~"), "~", 1))
+        return
+    if not os.path.exists(vm.vm_path(vm.BASE)):
+        with UI.step("Download the Debian 12 arm64 cloud image") as st:
+            vm.DOWNLOAD_PROGRESS = lambda done, total: st.set(
+                "%s / %s" % (kickem_ui.fmt_bytes(done), kickem_ui.fmt_bytes(total)) if total else kickem_ui.fmt_bytes(done))
+            vm.ensure_base()
+            vm.DOWNLOAD_PROGRESS = None
+            st.done(kickem_ui.fmt_bytes(os.path.getsize(vm.vm_path(vm.BASE))))
+    work = vm.vm_path("provision")
+    serial, console = os.path.join(work, "provision-serial.log"), os.path.join(work, "provision-console.log")
+    with UI.step("Provision the VM image (cloud-init, once)", poll=lambda: last_line(console, serial)) as st:
+        UI.follow(serial, "vm")
+        vm.provision(argparse.Namespace(accel=accel, force=False, timeout=3600))
+        UI.unfollow(serial)
+        st.done(kickem_ui.fmt_bytes(os.path.getsize(vm.vm_path(vm.PROVISIONED))))
 
 
 def cmd_run_vm(a):
@@ -786,8 +1052,11 @@ def cmd_run_vm(a):
     log = os.path.join(root, "build.log")
     with file_lock(root + ".lock"):
         if not (a.no_build and os.path.exists(panel_app(panel_build))):
+            UI.follow(log, "build")
             build_panel(path, panel_build, log)
-    vm.provision(argparse.Namespace(accel=a.accel or vm.default_accel(), force=False, timeout=3600))
+        else:
+            UI.line("skip", "Build panel", "--no-build: the existing build")
+    vm_image(vm, a.accel or vm.default_accel())
     t_built = time.monotonic()
 
     d = run_dir(a)
@@ -806,20 +1075,33 @@ def cmd_run_vm(a):
     try:
         vnc_sock = screen_socket(d, "vnc.sock") if a.screen == "embedded" else None
         if vnc_sock and a.display:
-            say("--display is ignored with --screen embedded (the VM's screen is in the panel); use --screen window --display for QEMU's window")
-        st = vm.boot(d, a.accel, a.display and not vnc_sock, a.vm_serial, a.sound, a.disk or [], vnc=vnc_sock)
+            warn("--display is ignored with --screen embedded (the VM's screen is in the panel); use --screen window --display for QEMU's window")
+        boot_log = os.path.join(d, "boot.log")
+        accel = a.accel or vm.default_accel()
+        with UI.step("Boot the VM (QEMU, %s)" % accel, log=boot_log, poll=lambda: last_line(boot_log), poll_every=0.5) as s:
+            UI.follow(boot_log)
+            try:
+                st = vm.boot(d, a.accel, a.display and not vnc_sock, a.vm_serial, a.sound, a.disk or [], vnc=vnc_sock)
+            finally:
+                q = (vm.read_state(d) or {}).get("qemu_pid")
+                if q and alive(q) and (q, "QEMU") not in started:
+                    started.append((q, "QEMU"))
+            s.done("SSH up (pid %d)" % st["qemu_pid"])
         vm.update_state(d, screen=a.screen, screen_socket=vnc_sock)
         vm.update_state(d, lock_wait_s=round(lock_wait, 1))
-        started.append((st["qemu_pid"], "QEMU"))
         set_lock_owner(st["qemu_pid"])
         probe_host = os.path.abspath(a.probe) if a.probe else None
         vm.update_state(d, probe_host=probe_host)
-        vm.deploy(d, tarball, path, vm.app_env(vm.GUEST_PROBE if a.probe else None), start_delay=not a.no_start_delay)
+        with UI.step("Deploy KT_Kick, the Starter Kit and the fork's service files") as s:
+            vm.deploy(d, tarball, path, vm.app_env(vm.GUEST_PROBE if a.probe else None), start_delay=not a.no_start_delay)
+            s.done("into the device paths")
 
         panel_log, kick_log = os.path.join(d, "panel.log"), os.path.join(d, "kick.log")
         panel_ctl, test_ctl = os.path.join(d, "panel.ctl"), os.path.join(d, "test.ctl")
-        for f in (panel_ctl, test_ctl, kick_log):
+        for f in (panel_ctl, test_ctl, kick_log, panel_log):
             open(f, "w").close()
+        UI.follow(kick_log)
+        UI.follow(panel_log)
         dev = vm.read_state(d)["serial_device"]
         transport = dev if dev.startswith("tcp:") else "serial:" + dev
         cmd = [panel_app(panel_build), "--transport", transport, "--control", panel_ctl]
@@ -832,9 +1114,9 @@ def cmd_run_vm(a):
             panel = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                      cwd=d, start_new_session=True)
         started.append((panel.pid, "panel"))
-        if not wait_for(panel_log, r"SimSerial: (?:listening on|connected to|opened) (\S+)", 40, [panel.pid]):
-            say("the panel did not open %s, see %s" % (transport, panel_log))
-            return 1
+        wait_step("Start panel", panel_log, r"SimSerial: (?:listening on|connected to|opened) (\S+)", 40, [panel.pid],
+                  "the panel did not open %s, see %s" % (transport, panel_log),
+                  result=lambda m: "on the guest's /dev/ttyAMA0 = %s (pid %d)" % (dev, panel.pid))
         st = vm.update_state(d, firmware=url, ref=a.ref, commit=commit, panel_build=panel_build,
                              kick_pid=st["qemu_pid"], panel_pid=panel.pid, launcher_pid=os.getpid(),
                              device="/dev/ttyAMA0 (guest) = " + dev, kick_log=kick_log, panel_log=panel_log,
@@ -843,43 +1125,39 @@ def cmd_run_vm(a):
         t_app = time.monotonic()
         vm.start_app(d)
         say("ktkick.service started in the guest; waiting for the handshake")
-        ok = wait_for(kick_log, r"Send Comm Live", 120 if st["accel"] != "tcg" else 1200, [st["qemu_pid"], panel.pid])
-        live = ok and wait_for(panel_log, r"SimSerial: LIVE", 10, [st["qemu_pid"], panel.pid])
-        if not live:
-            say("no control-surface handshake; see %s, %s and %s" % (kick_log, panel_log, st["boot_log"]))
-            return 1
+        nohs = "no control-surface handshake; see %s, %s and %s" % (kick_log, panel_log, st["boot_log"])
+        wait_step("Start ktkick.service%s" % ("" if a.no_start_delay else " (kt_kick.sh sleeps 15 s first)"), kick_log,
+                  r"Send Comm Live", 120 if st["accel"] != "tcg" else 1200, [st["qemu_pid"], panel.pid], nohs,
+                  result=lambda m: "KT_Kick up")
+        wait_step("Handshake", panel_log, r"SimSerial: LIVE", 10, [st["qemu_pid"], panel.pid], nohs,
+                  result=lambda m: "LIVE (%.1f s after ktkick.service started)" % (time.monotonic() - t_app))
         t_live = time.monotonic()
         st = vm.update_state(d, live_s=round(t_live - t_app, 1), total_s=round(t_live - t_start, 1),
                              guest_app_pid=vm.guest_app_pid(st))
         say("handshake LIVE %.1f s after ktkick.service started (artifact + panel %.1f s, lock wait %.1f s, boot %.1f s, "
             "deploy %.1f s; %.1f s since kickem started)" % (t_live - t_app, t_built - t_start, lock_wait,
                                                              st.get("boot_s", 0), st.get("deploy_s", 0), t_live - t_start))
-        print("screen    %s" % ("embedded in the panel (QEMU VNC on %s)" % vnc_sock if vnc_sock else
-                                ("QEMU's window" if a.display else "headless (QMP screendumps)")))
-        print("device    /dev/ttyAMA0 in the guest, %s here" % dev)
-        print("kick log  %s" % kick_log)
-        print("panel log %s" % panel_log)
-        print("boot log  %s" % st["boot_log"])
-        print("ssh       %s ssh --out %s" % (os.path.join(ROOT, "modes", "vm", "kickem_vm.py"), d))
-        print("state     %s" % state_path(d), flush=True)
+        UI.out("screen    %s" % ("embedded in the panel (QEMU VNC on %s)" % vnc_sock if vnc_sock else
+                                 ("QEMU's window" if a.display else "headless (QMP screendumps)")))
+        UI.out("device    /dev/ttyAMA0 in the guest, %s here" % dev)
+        UI.out("kick log  %s" % kick_log)
+        UI.out("panel log %s" % panel_log)
+        UI.out("boot log  %s" % st["boot_log"])
+        UI.out("ssh       %s ssh --out %s" % (os.path.join(ROOT, "modes", "vm", "kickem_vm.py"), d))
+        UI.out("state     %s" % state_path(d))
         if a.detach:
             started.clear()
+            UI.note("left running: `kickem stop%s` stops it" % (" --out " + shlex.quote(d) if a.out else ""))
             return 0
         say("running; Ctrl-C (or quitting the panel or the VM) stops both")
-        stopping = []
-        signal.signal(signal.SIGTERM, lambda *_: stopping.append(1))
-        try:
-            while not stopping and alive(st["qemu_pid"]) and alive(panel.pid):
-                reap(panel.pid)
-                time.sleep(0.5)
-        except KeyboardInterrupt:
-            pass
+        foreground_loop("Running", [st["qemu_pid"], panel.pid], "the VM and the panel; quitting either stops both")
         return 0
     finally:
         if started:
-            stop_run_vm(d, quiet=True)
-            for pid, name in reversed(started):
-                stop_pid(pid, name)
+            with UI.step("Stop the VM and the panel"):
+                stop_run_vm(d, quiet=True)
+                for pid, name in reversed(started):
+                    stop_pid(pid, name)
             release_lock([os.getpid()] + [p for p, _ in started])
         elif lock_owner() == os.getpid():
             release_lock([os.getpid()])
@@ -893,7 +1171,7 @@ def stop_run_vm(d, quiet=False):
     remove_socket(st.get("screen_socket"))
     release_lock((st.get("qemu_pid", 0), st.get("panel_pid", 0), st.get("launcher_pid", 0)))
     if not quiet:
-        say("stopped the VM (pid %s) and the panel (pid %s)" % (st.get("qemu_pid"), st.get("panel_pid")))
+        done_msg("stopped the VM (pid %s) and the panel (pid %s)" % (st.get("qemu_pid"), st.get("panel_pid")))
     return 0
 
 
@@ -919,12 +1197,24 @@ def cmd_status(a):
     if not st:
         say("no run in %s" % run_dir(a))
         return 1
+    c = UI.style
+    running = [k for k in ("kick_pid", "panel_pid") if st.get(k)]
+    up = [k for k in running if alive(st.get(k, 0))]
+    if UI.color:
+        if st.get("stopped") or not up:
+            head = c(kickem_ui.DOT, "dim") + " " + c("not running", "dim")
+        elif len(up) == len(running):
+            head = c(kickem_ui.OK, "green") + " " + c("running", "green")
+        else:
+            head = c(kickem_ui.WARN, "yellow") + " " + c("partly running", "yellow")
+        print("%s  %s mode, %s" % (head, st.get("mode", "fast"), run_dir(a)))
     for k in ("firmware", "ref", "commit", "device", "screen", "kick_pid", "panel_pid", "kick_log", "panel_log"):
         extra = ""
         if k.endswith("_pid"):
-            extra = " (running)" if alive(st.get(k, 0)) else " (gone)"
-        print("%-11s %s%s" % (k, st.get(k), extra))
-    print("lock        %s pid %s" % (LOCK, lock_owner() or "-"))
+            on = alive(st.get(k, 0))
+            extra = c(" (running)", "green") if on else c(" (gone)", "red")
+        print("%s %s%s" % (c("%-11s" % k, "dim"), st.get(k), extra))
+    print("%s %s pid %s" % (c("%-11s" % "lock", "dim"), LOCK, lock_owner() or "-"))
     return 0
 
 
@@ -932,7 +1222,13 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="kickem", description="Run a Kick firmware fork against the emulated front panel.")
     sub = p.add_subparsers(dest="command", required=True)
 
+    def output(sp):
+        sp.add_argument("--verbose", "-v", action="store_true", help="show what runs underneath (git, cmake, the compiler, docker, "
+                        "QEMU, the logs) as it runs; on a terminal Ctrl-O or v switches it on and off")
+        sp.add_argument("--no-color", action="store_true", help="no colour (also: NO_COLOR set in the environment)")
+
     def common(sp):
+        output(sp)
         sp.add_argument("--firmware", default=DEFAULT_FIRMWARE, metavar="URL", help="firmware git URL or local repository (default: %(default)s)")
         sp.add_argument("--ref", default=DEFAULT_REF, help="branch, tag or full commit SHA (default: %(default)s)")
         sp.add_argument("--force", action="store_true", help="discard local changes in the cached checkout")
@@ -976,11 +1272,34 @@ def main(argv=None):
     for name, fn, hlp in (("stop", cmd_stop, "stop the running Kick and panel, release the lock"),
                           ("status", cmd_status, "show the current run")):
         s = sub.add_parser(name, help=hlp)
+        output(s)
         s.add_argument("--out", help="the run directory (default: <cache>/run)")
         s.set_defaults(func=fn)
 
     a = p.parse_args(argv)
-    return a.func(a)
+    UI.command = a.command
+    # The compact view for the commands that do work; stop and status only get colour.
+    UI.configure(no_color=a.no_color, verbose=a.verbose, interactive=a.command in ("fetch", "build", "run"))
+    if UI.fancy:
+        UI.start(os.path.join(cache_dir(), "logs", "kickem-%s.log" % a.command))
+    else:
+        UI.start()
+    try:
+        return a.func(a)
+    except Failed as e:
+        if not e.reported and e.msg:
+            UI.error(e.msg)
+            if e.log:
+                UI.show_tail(e.log)
+        if UI.fancy and UI.log_path:
+            UI._emit(UI.style("  kickem's own log: %s" % UI.log_path, "dim"))
+        return e.code
+    except KeyboardInterrupt:
+        if UI.fancy:
+            UI.error("interrupted")
+        return 130
+    finally:
+        UI.stop()
 
 
 if __name__ == "__main__":

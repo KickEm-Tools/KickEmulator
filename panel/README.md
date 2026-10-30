@@ -24,14 +24,36 @@ kickem-panel [--transport pty|pty:<link>|tcp:<host>:<port>|serial:<dev>[@<baud>]
 ```sh
 MACOSX_DEPLOYMENT_TARGET=12.0 cmake -S . -B build -DKICKEM_PROTOCOL_JUCE=juce \
       [-DKICKEM_FIRMWARE_DIR=<0700-AAM checkout>] [-DCPM_SOURCE_CACHE=<dir with JUCE>]
-cmake --build build --target kickem-panel     # build/panel/kickem-panel, a plain executable
+cmake --build build --target kickem-panel
 ```
+
+On macOS that makes `build/panel/KickEm.app`, an app bundle (executable `Contents/MacOS/KickEm`,
+with `build/panel/kickem-panel` a symlink to it); elsewhere `build/panel/kickem-panel`, a plain
+executable. The bundle is CMake's own (`MACOSX_BUNDLE`, `macos/Info.plist.in`), not JUCE's
+`juce_add_gui_app`, so `juceaide` is still not needed.
+
+**A regular app on macOS.** The panel shows in the Dock and in Command-Tab as **KickEm**, with its
+icon, and comes to the front when it starts. Before, it was a bare executable: LaunchServices
+registered it as `BackgroundOnly` (`lsappinfo` showed `type="BackgroundOnly"`, `bundleID=[ NULL ]`),
+so it had no Dock icon and Command-Tab skipped it, and once another window covered it there was no
+way back to it but the mouse. Now the bundle's `Info.plist` makes it a foreground app
+(`type="Foreground"`), `Main.cpp` asks to be activated when it starts (kickem starts it from a
+background process), and a bare executable (a release tarball) turns itself into a foreground app
+too (`Process::setDockIconVisible`), without the bundle's name and icon. The icon
+(`macos/KickEm.icns`: a dark rounded square with a 4x4 grid of pads, a few lit; no logo, no
+lettering) is drawn by `macos/make_icon.py` (Python standard library; reproduces the committed file
+byte for byte).
+
+In embedded fast mode the firmware's `Kick` has, on purpose, no window and no Dock icon (its screen
+mirror makes it a `UIElement`); only the panel is on the desktop. With `--screen window` the `Kick`
+app is a regular app with its own window, in the Dock and in Command-Tab next to KickEm.
 
 ## Files
 
 | File | What it holds |
 |---|---|
 | `Main.cpp` | The program: arguments, window, logger (stdout), wiring of panel, link and control channel |
+| `macos/` | `Info.plist.in` for the app bundle, `KickEm.icns` and `make_icon.py`, which draws it |
 | `PanelLink.{h,cpp}` | The microcontroller's side of the link: framing with the fetched `CPktMgr`, a reader and a writer thread, the handshake, `SimSerial:` logging |
 | `kick_Simulator.{h,cpp}` | Panel geometry (canvas units measured from a photo of the unit), drawing, SHIFT semantics, pad-colour, LED and slider-ladder decoding, and the packet each control sends |
 | `ScreenView.{h,cpp}` | The embedded screen: a small RFB client drawn in the display cut-out, and the mouse on it sent back as touches |

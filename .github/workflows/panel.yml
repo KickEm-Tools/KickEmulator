@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Builds kickem-panel for macOS arm64, Linux x86_64 and Linux arm64. On a tag panel-v* it attaches
+# Builds kickem-panel for macOS arm64 (the app bundle KickEm.app), Linux x86_64 and Linux arm64 (a
+# plain executable, kickem-panel). On a tag panel-v* it attaches
 # the builds to a GitHub Release; workflow_dispatch and pull requests that touch the panel build
 # them as workflow artifacts only.
 #
@@ -108,9 +109,19 @@ jobs:
           [ "$GITHUB_REF_TYPE" = tag ] || ver="dev-$(git -C emulator rev-parse --short=10 HEAD)"
           name="kickem-panel-$ver-${{ matrix.target }}"
           mkdir -p "dist/$name"
-          cp build/panel/kickem-panel "dist/$name/"
-          strip "dist/$name/kickem-panel" 2>/dev/null || true
-          [ "$RUNNER_OS" = macOS ] && codesign --force --sign - "dist/$name/kickem-panel"   # ad-hoc: arm64 needs a signature
+          if [ "$RUNNER_OS" = macOS ]; then
+            # The app bundle (a regular app: Dock, Command-Tab, its name and icon); ditto keeps
+            # symlinks and metadata. Ad-hoc signed after stripping: arm64 needs a signature.
+            exe="KickEm.app/Contents/MacOS/KickEm"
+            ditto build/panel/KickEm.app "dist/$name/KickEm.app"
+            strip "dist/$name/$exe" 2>/dev/null || true
+            codesign --force --deep --sign - "dist/$name/KickEm.app"
+            codesign --verify --deep --strict "dist/$name/KickEm.app"
+          else
+            exe="kickem-panel"
+            cp build/panel/kickem-panel "dist/$name/"
+            strip "dist/$name/kickem-panel" 2>/dev/null || true
+          fi
           cp emulator/LICENSE "dist/$name/"
           cp emulator/panel/README.md "dist/$name/README-panel.md"
           {
@@ -120,24 +131,26 @@ jobs:
             echo "built:     $(date -u +%Y-%m-%dT%H:%M:%SZ) on $ImageOS $ImageVersion"
             if [ "$RUNNER_OS" = Linux ]; then
               echo "glibc:     $(ldd --version | head -1)"
-              echo "needs:     $(ldd "dist/$name/kickem-panel" | awk '{print $1}' | grep -v '^/' | tr '\n' ' ')"
+              echo "needs:     $(ldd "dist/$name/$exe" | awk '{print $1}' | grep -v '^/' | tr '\n' ' ')"
             fi
             echo
             if [ "$RUNNER_OS" = macOS ]; then
-              echo "macOS: the binary is not notarised. After downloading, run"
-              echo "    xattr -d com.apple.quarantine kickem-panel"
+              echo "macOS: KickEm.app is ad-hoc signed, not notarised. After unpacking, run"
+              echo "    xattr -dr com.apple.quarantine KickEm.app"
               echo "or open it once from Finder with right-click > Open (or allow it in System Settings >"
-              echo "Privacy & Security). Needs macOS 12 or later on Apple Silicon."
+              echo "Privacy & Security). Needs macOS 12 or later on Apple Silicon. To give it arguments,"
+              echo "start its executable: KickEm.app/Contents/MacOS/KickEm --transport pty"
             else
               echo "Linux: needs X11 and FreeType (Debian/Ubuntu: libx11-6 libxext6 libxrandr2 libxinerama1"
               echo "libxcursor1 libfreetype6). Under Wayland it runs through Xwayland."
             fi
             echo
-            echo "Usage: kickem-panel --transport pty | tcp:HOST:PORT | serial:/dev/tty... [--control FILE]"
+            echo "Usage: $exe --transport pty | tcp:HOST:PORT | serial:/dev/tty... [--control FILE]"
             echo "See https://github.com/$GITHUB_REPOSITORY#readme"
           } > "dist/$name/BUILD-INFO.txt"
           cat "dist/$name/BUILD-INFO.txt"
-          file "dist/$name/kickem-panel"
+          file "dist/$name/$exe"
+          echo "exe=$exe" >> "$GITHUB_OUTPUT"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           ( cd dist && (shasum -a 256 "$name.tar.gz" 2>/dev/null || sha256sum "$name.tar.gz") > "$name.tar.gz.sha256" )
           echo "name=$name" >> "$GITHUB_OUTPUT"
@@ -147,7 +160,7 @@ jobs:
       - name: Start it
         shell: bash
         run: |
-          bin="dist/${{ steps.package.outputs.name }}/kickem-panel"
+          bin="dist/${{ steps.package.outputs.name }}/${{ steps.package.outputs.exe }}"
           if [ "$RUNNER_OS" = Linux ]; then
             sudo apt-get install -y -q --no-install-recommends xvfb xauth > /dev/null
             run="xvfb-run -a"
@@ -191,7 +204,7 @@ jobs:
 
           | File | For |
           |---|---|
-          | \`kickem-panel-*-macos-arm64.tar.gz\` | macOS 12+ on Apple Silicon (not notarised: \`xattr -d com.apple.quarantine kickem-panel\`, or right-click > Open) |
+          | \`kickem-panel-*-macos-arm64.tar.gz\` | macOS 12+ on Apple Silicon: \`KickEm.app\` (not notarised: \`xattr -dr com.apple.quarantine KickEm.app\`, or right-click > Open) |
           | \`kickem-panel-*-linux-x86_64.tar.gz\` | Linux x86_64, glibc 2.35+ (Ubuntu 22.04, Debian 12) |
           | \`kickem-panel-*-linux-arm64.tar.gz\` | Linux arm64, glibc 2.35+ |
 

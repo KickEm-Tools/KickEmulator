@@ -40,26 +40,106 @@ git clone https://github.com/KickEm-Tools/KickEmulator.git && cd KickEmulator
 ./kickem run                                     # fetch KickEm-Tools/0700-AAM main, build, start the panel and Kick
 ```
 
-One window opens: the panel, with the Kick's screen (the fork's own `Kick` app) inside it. On the
-Projects screen, press **PUSH** on the panel to load the Starter Kit, then **PLAY** (the round green
-key). Click or drag on the screen as you would touch the unit's. Ctrl-C in the terminal stops both.
-`--screen window` gives the app its own window instead, as before. The first run downloads JUCE (about 170 MB) into
-`~/.cache/kickem/cpm` unless `CPM_SOURCE_CACHE` points at a cache that has it.
+One window opens: **KickEm**, the panel, with the Kick's screen (the fork's own `Kick` app)
+inside it. It is a regular macOS app: it comes to the front, and it is in the Dock and in
+Command-Tab. On the Projects screen, press **PUSH** on the panel to load the Starter Kit, then
+**PLAY** (the round green key). Click or drag on the screen as you would touch the unit's. Ctrl-C
+in the terminal stops both. `--screen window` gives the app its own window instead, as before.
 
 The embedded screen needs the firmware's opt-in screen mirror (`KICK_SCREEN_MIRROR`), which is in
 `KickEm-Tools/0700-AAM` `main` (pull request #23). Any other ref works as well (`--ref BRANCH`,
 `--firmware URL`); one without the mirror runs with the screen in its own window, and `kickem`
 says so (see [Pointing it at your fork](#pointing-it-at-your-fork)).
 
-**How long it takes** (Apple Silicon, 16 cores, JUCE already in the CPM cache), measured by
-`checks/smoke` from a cold cache on 2026-10-28:
+### How long the first run takes
 
-| Step | Time |
-|---|---|
-| fetch (shallow clone) | 8 s |
-| first build: `Kick` 114 s, panel 14 s | 128 s |
-| from the end of the build to the handshake | 2.4 s |
-| from the end of the build to sound out of the Starter Kit | 7.3 s, including the smoke test's 2 s pause after loading (target: 30 s) |
+The first `./kickem run` does everything once: it fetches the firmware (a shallow clone, about
+16 MB), downloads JUCE 7.0.12 through CPM (about 175-185 MB in `~/.cache/kickem/cpm`, unless
+`CPM_SOURCE_CACHE` points at a cache that has it), configures and compiles the firmware's `Kick`
+app and the panel, installs the Starter Kit, and starts both. Later runs only update the
+checkout, rebuild what changed and start.
+
+Measured with `./kickem run` from empty caches (`KICKEM_CACHE` and `CPM_SOURCE_CACHE` in new
+temporary directories) on an Apple M4 Max (16 cores) on 2026-10-29 and 2026-10-30:
+
+| Step | First run, quiet machine | First run, busy machine (load 7), slower network | Later run |
+|---|---|---|---|
+| Fetch firmware | 5.5 s | 26 s | 2 s (an update) |
+| Download JUCE (CPM) and configure `Kick` | 38 s | 72 s + 21 s | cached |
+| Compile `Kick` (51 files, link with LTO) | 98 s | 2m43s | 0.7 s when nothing changed |
+| Configure and build the panel | 15 s | 21 s | 0.3 s |
+| Install the Starter Kit, start the panel and `Kick`, handshake LIVE | 2 s | 2 s | 1.5 s |
+| **Total, `./kickem run` to LIVE** | **2m38s** | **5m04s** | **4.3 s** |
+
+A slower computer compiles for longer (the compile scales with cores), and a slower network makes
+the fetch and the JUCE download longer. After you change the fork, a run rebuilds only the files
+that changed. The first faithful-mode run takes longer still; see
+[Faithful mode](#faithful-mode---mode-vm).
+
+### What you see while it works
+
+On a terminal `kickem` shows one line per step, with a spinner, real progress where there is any
+(git's, the JUCE download's bytes, files compiled, Docker's build steps, the VM image download)
+and the time, and keeps a line with the result and the time of each finished step:
+
+```
+✔ Fetch firmware KickEm-Tools/0700-AAM@main  (4f8853e9)  25.8 s
+✔ Download JUCE 7.0.12 (CPM, once per cache)  174 MB into ~/.cache/kickem/cpm  1m12s
+✔ Configure Kick  20.6 s
+✔ Build Kick  51 files compiled  2m43s
+✔ Build panel  12 files compiled, KickEm.app  19.4 s
+✔ Install Starter Kit
+✔ Start panel  /dev/ttys017 (pid 89685)  0.5 s
+✔ Start Kick  pid 89726, screen in the panel  1.5 s
+✔ Handshake  LIVE (1.48 s after Kick started)  0.0 s
+✔ Embed the Kick screen  first frame in the panel  0.0 s
+⠋ Running  the panel and Kick; quitting either stops both  12.4 s
+ctrl-o: details  ·  ctrl-c: stop
+```
+
+and while a step runs, its line is redrawn in place:
+
+```
+⠧ Download JUCE 7.0.12 (CPM, once per cache)  92.2 MB / ~185 MB  1m04s
+⠇ Build Kick  [18/35] compiled  21.9 s
+```
+
+- **Ctrl-O** (or **v**) switches to the details view: the output of what runs underneath, as it
+  is written (git, CMake, the compiler, Docker, QEMU's boot console, and once running the app's
+  and the panel's logs, each line labelled with where it came from). Ctrl-O again goes back to the
+  compact view. `--verbose` starts in the details view. (Ctrl-O is the terminal's "discard
+  output" key on macOS; `kickem` turns that off while it runs and restores the terminal on exit,
+  Ctrl-C or an error.)
+- On a failure the step gets a red ✘, the last 40 lines of its log and the log's path.
+- `--no-color` or `NO_COLOR` turn colour off. When the output is not a terminal (a pipe, a file,
+  CI, the checks) `kickem` prints plain, stable lines instead: `kickem: <message>` as before, and
+  `kickem: [ ok ] <step>  <result>  <time>` (or `[FAIL]`) per step. The lines on stdout
+  (`firmware`, `commit`, `kick log`, ...) are the same either way.
+- `kickem status` and `kickem stop` use the same colours. Everything `kickem` printed in the
+  compact view is also in `~/.cache/kickem/logs/kickem-<command>.log`.
+
+### Testing your own fork
+
+```sh
+./kickem run --firmware https://github.com/<you>/0700-AAM.git --ref my-branch    # your fork on GitHub
+./kickem run --firmware /path/to/your/0700-AAM --ref my-branch                   # a local clone (commit first: it fetches the branch)
+./kickem run --firmware https://github.com/<you>/0700-AAM.git --ref my-branch --mode vm   # faithful mode: the Linux build in a VM
+```
+
+A fork needs to build on the desktop and to have the serial port and the opt-in extension points
+that are now in `KickEm-Tools/0700-AAM` `main`; a fork of a recent `main` has them all, and an
+older one needs them merged in (the table in [Pointing it at your fork](#pointing-it-at-your-fork)
+lists them, and `kickem` names what is missing before it builds).
+
+### Windows: coming soon
+
+Today the emulator is verified on macOS (Apple Silicon). Fast mode on a Linux desktop is not
+automated yet (the reusable CI runs faithful mode on Linux arm64 runners). On Windows, fast mode cannot run
+yet: the firmware's serial port (`juce_serialport`) is a stub there, and `kickem` and the panel use
+POSIX APIs (ptys, termios). Faithful mode is planned to work on Windows, with the panel connected
+to QEMU's serial port over TCP (`--vm-serial tcp` exists for that). It is coming, without a date
+yet; if you want it, say so in the
+[issue tracker](https://github.com/KickEm-Tools/KickEmulator/issues).
 
 ## Modes
 
@@ -151,8 +231,28 @@ panel to the guest's UART (`/dev/ttyAMA0`, on a pty here), and starts `ktkick.se
 runs for real. Screen touches and screenshots go through QMP. Details, the VM's hardware and what
 ran for real: [`modes/vm/README.md`](modes/vm/README.md).
 
-**How long it takes** (Apple M4 Max, measured by `checks/smoke --mode vm` on 2026-10-29, without
-the time spent waiting for another emulator's lock):
+**The first run and later runs** (Apple M4 Max, 16 cores, hvf; `./kickem run --mode vm` from
+nothing on 2026-10-30: a builder image built with `docker build --no-cache`, an empty Docker build
+volume, and empty `KICKEM_CACHE` and `CPM_SOURCE_CACHE`; the machine was busy, load about 6):
+
+| Step | First run | Later run |
+|---|---|---|
+| Build the Docker builder image (Debian 12 arm64 and the `-dev` packages, once) | 77 s | cached |
+| Fetch firmware | 14 s | 1 s |
+| Build `KT_Kick` for linux/arm64 in Docker (JUCE downloaded in the container, compile with LTO) | 6m39s | built already |
+| Download JUCE on the host and build the panel | 45 s + 20 s | 0.3 s |
+| Download the Debian 12 arm64 cloud image (438 MB) | 46 s | cached |
+| Provision the image with cloud-init (once; 562 MB after) | 2m17s | cached |
+| Boot (QEMU start to SSH), deploy, panel | 14 s | 14 s |
+| `ktkick.service` to LIVE (includes `kt_kick.sh`'s 15 s sleep) | 16 s | 16 s |
+| **Total, `./kickem run --mode vm` to LIVE** | **about 12m50s** (11m32s with the image built) | **31 s** |
+
+Slower machines and networks take longer: the artifact build scales with cores and with the
+memory Docker Desktop has (about 2.5 GB per compiler job), and the two downloads with bandwidth.
+On a quieter machine the artifact build has taken 244-290 s and provisioning 95-112 s.
+
+**Each step** (Apple M4 Max, measured by `checks/smoke --mode vm` on 2026-10-29, without the time
+spent waiting for another emulator's lock):
 
 | Step | hvf | TCG on the same Mac (emulation speed) |
 |---|---|---|
@@ -178,6 +278,9 @@ glibc 2.39) does not start in the Debian 12 guest, so faithful mode builds its o
 ./kickem stop                                        # stop a --detach run, release the lock
 ./kickem status
 ```
+
+Every command also takes `--verbose` (the details view from the start; plain output: the steps'
+logs streamed) and `--no-color`. See [What you see while it works](#what-you-see-while-it-works).
 
 - `--firmware` defaults to `https://github.com/KickEm-Tools/0700-AAM.git`; a local repository path
   works too. `--ref` is a branch, a tag or a full commit SHA (default `main`).
@@ -316,16 +419,18 @@ another 10 minutes after the build.
 
 ## Panel downloads
 
-Tagged releases (`panel-v*`) carry `kickem-panel` for macOS arm64, Linux x86_64 and Linux arm64
+Tagged releases (`panel-v*`) carry the panel for macOS arm64 (`KickEm.app`), Linux x86_64 and
+Linux arm64 (`kickem-panel`)
 (`.github/workflows/panel.yml`; no Windows build yet, because the transports are POSIX). Use a
 release to drive a VM's or a unit's serial port without building anything; `kickem` itself always
 builds the panel from the firmware ref it runs, so a fork that changes the protocol is followed.
 Each archive has `BUILD-INFO.txt` with the firmware commit its protocol headers came from.
 
-- **macOS** (12 or later, Apple Silicon): the binary is ad-hoc signed, not notarised, so
+- **macOS** (12 or later, Apple Silicon): `KickEm.app` is ad-hoc signed, not notarised, so
   Gatekeeper blocks it the first time. After unpacking, either run
-  `xattr -d com.apple.quarantine kickem-panel`, or open it once from Finder with right-click >
-  **Open** (or **Open Anyway** in System Settings > Privacy & Security).
+  `xattr -dr com.apple.quarantine KickEm.app`, or open it once from Finder with right-click >
+  **Open** (or **Open Anyway** in System Settings > Privacy & Security). To pass arguments, start
+  its executable, `KickEm.app/Contents/MacOS/KickEm`, in place of `./kickem-panel` below.
 - **Linux** (glibc 2.35 or later: Ubuntu 22.04, Debian 12): needs X11 and FreeType
   (`libx11-6 libxext6 libxrandr2 libxinerama1 libxcursor1 libfreetype6`); under Wayland it runs
   through Xwayland.
@@ -351,7 +456,8 @@ Each archive has `BUILD-INFO.txt` with the firmware commit its protocol headers 
 
 | Path | What |
 |---|---|
-| `panel/` | The front panel, `kickem-panel`, and its embedded screen (`ScreenView`, an RFB client); see `panel/README.md` |
+| `panel/` | The front panel, `kickem-panel` (`KickEm.app` on macOS, `panel/macos/`), and its embedded screen (`ScreenView`, an RFB client); see `panel/README.md` |
+| `cli/` | `kickem_ui.py`: what `kickem` prints, the compact view and its details view, and the plain output |
 | `transport/` | pty, TCP and serial transports for the panel, and the throttle |
 | `cmake/` | `KickemFirmware.cmake`: fetches the firmware by URL and ref, and exposes the protocol targets |
 | `tools/protocol_roundtrip/` | Encodes and decodes packets with the fetched ref's `CPktMgr`, as the app's serial reader does |

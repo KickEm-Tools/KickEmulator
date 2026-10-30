@@ -63,6 +63,11 @@ CANNOT_TELL = ("faithful mode cannot tell you latency, CPU headroom on the A53 c
                "driver, or the control-surface microcontroller's own behaviour.")
 
 
+# kickem replaces say and die (its terminal view) and sets DOWNLOAD_PROGRESS(done, total) to show
+# the image download's bytes.
+DOWNLOAD_PROGRESS = None
+
+
 def say(msg):
     print("kickem vm: " + msg, file=sys.stderr, flush=True)
 
@@ -150,12 +155,16 @@ def ensure_base():
     tmp = path + ".part"
     h = hashlib.sha512()
     with urllib.request.urlopen(IMAGE_URL, timeout=60) as r, open(tmp, "wb") as f:
+        total, done = int(r.headers.get("Content-Length") or 0), 0
         while True:
             b = r.read(1 << 20)
             if not b:
                 break
             h.update(b)
             f.write(b)
+            done += len(b)
+            if DOWNLOAD_PROGRESS:
+                DOWNLOAD_PROGRESS(done, total)
     if h.hexdigest() != want:
         os.remove(tmp)
         die("checksum mismatch for %s" % BASE)

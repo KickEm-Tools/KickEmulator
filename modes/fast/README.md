@@ -25,7 +25,8 @@ default), which does this:
 5. **Run**, holding the machine-wide lock (`/tmp/kt_kickem.lock`, the in-tree `sim_launch.sh`
    format; it also waits while any `Kick` or `KT_KickEM` runs without it, since `Kick` is
    single-instance):
-   - the panel, `kickem-panel --transport pty --control <run>/panel.ctl`, which logs
+   - the panel, `kickem-panel --transport pty --control <run>/panel.ctl` (on macOS the executable
+     inside `panel/KickEm.app`, so it is a regular app in the Dock and Command-Tab), which logs
      `SimSerial: listening on /dev/ttysNNN`;
    - `Kick`, from `kick/`, with `KICK_SERIAL_DEVICE=<that pty>`, `KICK_TEST_CONTROL=<run>/test.ctl`,
      `KICK_AUDIO_INPUT=silence` (unless set), `KICK_AUDIO_PROBE=<wav>` with `--probe`, and

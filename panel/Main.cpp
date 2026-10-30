@@ -38,7 +38,7 @@ namespace
     {
     public:
         explicit PanelWindow( bool EmbeddedScreen )
-            : juce::DocumentWindow( "KickEmulator panel", juce::Colours::black, juce::DocumentWindow::allButtons )
+            : juce::DocumentWindow( "KickEm", juce::Colours::black, juce::DocumentWindow::allButtons )
         {
             setUsingNativeTitleBar( true );
             setContentNonOwned( &content, true );
@@ -60,7 +60,7 @@ namespace
     class PanelApp : public juce::JUCEApplication
     {
     public:
-        const juce::String getApplicationName() override { return "KickEmulator panel"; }
+        const juce::String getApplicationName() override { return "KickEm"; }
         const juce::String getApplicationVersion() override { return "0.1.0"; }
         bool               moreThanOneInstanceAllowed() override { return true; }
 
@@ -100,6 +100,7 @@ namespace
             link = std::make_unique<sim::PanelLink>( std::move( transport ), !quiet );
 
             window = std::make_unique<PanelWindow>( screenMode == "embedded" );
+            showAsRegularApp();
             auto& panel = window->content.getPanel();
             if( screenMode == "embedded" )
                 panel.setEmbeddedScreen( std::make_unique<sim::ScreenView>( screenSource ) );
@@ -171,6 +172,21 @@ namespace
         void systemRequestedQuit() override { quit(); }
 
     private:
+        // A regular app with a Dock icon and a place in Command-Tab, in front when it starts.
+        // macOS: the bundle (panel/macos/Info.plist.in) makes LaunchServices register the panel
+        // as a foreground app; a bare executable (the old build, a release tarball) is registered
+        // as BackgroundOnly, which TransformProcessType (setDockIconVisible) turns into a
+        // foreground app too. kickem starts the panel from a background process, so it asks to
+        // be activated rather than waiting for a click.
+        void showAsRegularApp()
+        {
+#if JUCE_MAC
+            juce::Process::setDockIconVisible( true );
+#endif
+            window->toFront( true );
+            juce::Process::makeForegroundProcess();
+        }
+
         void fail( const juce::String& Why )
         {
             sim::logLine( Why );
